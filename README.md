@@ -1,4 +1,4 @@
-#Web Scrapper Central da Toca#
+# Web Scrapper Central da Toca
 
 Simple web scrapper using node to get the latest news from the website Central da Toca.
 
