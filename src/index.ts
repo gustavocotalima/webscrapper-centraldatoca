@@ -4,19 +4,19 @@ import * as cheerio from 'cheerio';
 import fs from 'fs';
 import path from 'path';
 
-// Loads environment variables from .env file
+// Carrega as variáveis de ambiente do arquivo .env
 dotenv.config();
 
-// Retrieves the Discord webhook URL from environment variables
+// Recupera a URL do webhook do Discord a partir das variáveis de ambiente
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL as string;
 
-// Retrieves the target URL (website to scrape) from environment variables
+// URL que será verificada para extrair as notícias
 const TARGET_URL = "https://www.centraldatoca.com.br/ultimas/";
 
-// Path of the file that will store the processed URLs
+// Caminho do arquivo que armazenará as URLs processadas
 const processedNewsFilePath = path.resolve(__dirname, 'processedNews.json');
 
-// Loads processed URLs from the file (to avoid duplicate submissions)
+// Carrega as URLs processadas do arquivo (para evitar envios duplicados)
 let processedNews = new Set<string>();
 if (fs.existsSync(processedNewsFilePath)) {
   const data = fs.readFileSync(processedNewsFilePath, 'utf-8').trim();
@@ -24,26 +24,26 @@ if (fs.existsSync(processedNewsFilePath)) {
     try {
       processedNews = new Set(JSON.parse(data));
     } catch (err) {
-      console.error('Error parsing processedNews.json. Starting with an empty set.', err);
+      console.error('Erro ao fazer parse do arquivo processedNews.json. Iniciando com um conjunto vazio.', err);
       processedNews = new Set();
     }
   }
 }
 
-// Function to save processed URLs to a file
+// Função para salvar as URLs processadas no arquivo
 function saveProcessedNews() {
   fs.writeFileSync(processedNewsFilePath, JSON.stringify(Array.from(processedNews)));
 }
 
-// Function to fetch the full content of a news article from its page
+// Função para buscar o conteúdo completo da notícia a partir de sua URL
 async function getFullNewsSummary(newsUrl: string): Promise<string> {
   try {
     const { data } = await axios.get(newsUrl);
     const $ = cheerio.load(data);
-    // Adjust the selector to capture the full content of the article
+    // Ajuste o seletor para capturar o conteúdo completo da notícia
     let fullSummary = $('div.td-post-content').text().trim();
     
-    // Extract only the text from paragraphs and headings
+    // Extrai somente os textos dos parágrafos e cabeçalhos
     fullSummary = $('div.td-post-content')
       .find('p, h1, h2, h3, h4, h5, h6')
       .map((i, el) => $(el).text())
@@ -54,13 +54,13 @@ async function getFullNewsSummary(newsUrl: string): Promise<string> {
       .trim();
     return fullSummary;
   } catch (error) {
-    console.error(`Error fetching the full article content from ${newsUrl}:`, error); 
+    console.error(`Erro ao buscar o conteúdo completo da notícia em ${newsUrl}:`, error); 
     return '';
   }
 }
 
-// Function to call the local Ollama API to generate a summary
-// Endpoint: http://localhost:11434/api/generate, expects a JSON with "model" and "prompt"
+// Função para chamar a API do Ollama (no localhost) para gerar o resumo.
+// O endpoint utilizado é http://localhost:11434/api/generate e espera um JSON com "model" e "prompt".
 async function runOllama(prompt: string): Promise<string> {
   try {
     const response = await axios.post('http://localhost:11434/api/generate', {
@@ -68,15 +68,15 @@ async function runOllama(prompt: string): Promise<string> {
       prompt: prompt,
       stream: false
     });
-    // Assuming the response has a "response" field with the generated text
+    // Supondo que a resposta possua o campo "response" com o texto gerado.
     return response.data.response?.trim() || '';
   } catch (error) {
-    console.error('Error calling the Ollama API:', error);
+    console.error('Erro ao chamar a API do Ollama:', error);
     throw error;
   }
 }
 
-// Function that scrapes the website and extracts news with a full summary
+// Função que realiza o scraping do site e extrai as notícias com o resumo completo
 async function scrapeNews(): Promise<Array<{ title: string; url: string; summary: string }>> {
   try {
     const { data } = await axios.get(TARGET_URL);
@@ -91,7 +91,7 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
       const url = titleElement.attr('href') || '';
       
       if (url) {
-        // Fetch the full version of the content from the news page
+        // Busca a versão completa do conteúdo na página da notícia
         const fullSummary = await getFullNewsSummary(url);
         newsItems.push({ title, url, summary: fullSummary });
       }
@@ -99,47 +99,47 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
     
     return newsItems;
   } catch (error) {
-    console.error('Error scraping the site:', error);
+    console.error('Erro ao realizar o scraping:', error);
     return [];
   }
 }
 
-// Function that processes each news item: uses the local Ollama API to generate a summary and sends it to Discord
+// Função que processa cada notícia: utiliza a API local do Ollama para gerar o resumo e envia para o Discord
 async function processNewsItem(news: { title: string; url: string; summary: string }): Promise<void> {
   try {
-    // Define the prompt to extract a concise summary
-    const prompt = `This news was obtained via web scraping. Below, the title and the full content of the news. Create a concise summary explaining the text information. Max 1700 characters. Only reply with the summary text, nothing else.
-Title: ${news.title}
-Content: ${news.summary}`;
+    // Define o prompt para extrair um resumo conciso
+    const prompt = `Esta notícia foi obtida via web scraping. Abaixo, o título e o conteúdo completo da notícia. Crie um resumo conciso em que explique as informações do texto. Máx 1700 caracteres. Só responda o texto do resumo, nada mais.
+Título: ${news.title}
+Conteúdo: ${news.summary}`;
 
-    // Calls the local Ollama API
+    // Chama a API local do Ollama
     const importantInfo = await runOllama(prompt);
 
-    // Builds the message for Discord with the generated summary
+    // Monta a mensagem para o Discord com o resumo gerado
     const discordMessage = {
-      content: `**${news.title}**\n${importantInfo}\n\nRead more: ${news.url}`,
+      content: `**${news.title}**\n${importantInfo}\n\nLeia mais: ${news.url}`,
     };
 
     await axios.post(DISCORD_WEBHOOK_URL, discordMessage);
-    console.log(`News sent: ${news.title}`);
+    console.log(`Notícia enviada: ${news.title}`);
   } catch (error) {
-    console.error('Error processing the news with Ollama:', error);
-    // In case of an error processing with the model, send the full content
+    console.error('Erro ao processar a notícia com Ollama:', error);
+    // Em caso de erro ao processar com o modelo, envia o conteúdo completo da notícia
     try {
       const discordMessage = {
-        content: `**${news.title}**\n${news.summary.length > 1700 ? news.summary.slice(0, 1700) + '...' : news.summary}\n\nRead more: ${news.url}`,
+        content: `**${news.title}**\n${news.summary.length > 1700 ? news.summary.slice(0, 1700) + '...' : news.summary}\n\nLeia mais: ${news.url}`,
       };
       await axios.post(DISCORD_WEBHOOK_URL, discordMessage);
-      console.log(`News sent (full text): ${news.title}`);
+      console.log(`Notícia enviada (texto completo): ${news.title}`);
     } catch (err) {
-      console.error('Error sending full text message to Discord:', err);
+      console.error('Erro ao enviar mensagem completa para o Discord:', err);
     }
   }
 }
 
-// Main function that coordinates the extraction and sending of news
+// Função principal que coordena o fluxo de extração e envio das notícias
 async function main(): Promise<void> {
-  console.log('Checking for new news...');
+  console.log('Verificando novas notícias...');
   const newsItems = await scrapeNews();
   for (const news of newsItems) {
     if (!processedNews.has(news.url)) {
@@ -150,6 +150,6 @@ async function main(): Promise<void> {
   }
 }
 
-// Calls the main function immediately and schedules it to run every 5 minutes
+// Chama a função main imediatamente e agenda para ser executada a cada 5 minutos
 main();
 setInterval(main, 5 * 60 * 1000);
