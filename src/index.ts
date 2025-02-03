@@ -108,7 +108,7 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
 async function processNewsItem(news: { title: string; url: string; summary: string }): Promise<void> {
   try {
     // Define o prompt para extrair um resumo conciso
-    const prompt = `Esta notícia foi obtida via web scraping. Abaixo, o título e o conteúdo completo da notícia. Crie um resumo conciso em que explique as informações do texto. Máx 1700 caracteres. Só responda o texto do resumo, nada mais.
+    const prompt = `Reescreva o texto da notícia para ter no máximo 1700 caracteres, deve conter todas as informações importantes. Esta notícia foi obtida via web scraping. Abaixo, o título e o conteúdo completo da notícia. Só responda o texto gerado, nenhum prelambulo, nada mais.
 Título: ${news.title}
 Conteúdo: ${news.summary}`;
 
@@ -148,8 +148,9 @@ async function main(): Promise<void> {
       saveProcessedNews();
     }
   }
+  console.log('Verificação de notícias concluída.');
 }
 
-// Chama a função main imediatamente e agenda para ser executada a cada 5 minutos
+// Chama a função main imediatamente e agenda para ser executada a cada 1 minuto
 main();
-setInterval(main, 5 * 60 * 1000);
+setInterval(main, 60 * 1000);
