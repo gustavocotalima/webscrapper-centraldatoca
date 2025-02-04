@@ -99,7 +99,7 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
       }
     }
     
-    return newsItems;
+    return newsItems.reverse();
   } catch (error) {
     console.error('Erro ao realizar o scraping:', error);
     return [];
