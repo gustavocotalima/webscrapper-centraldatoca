@@ -7,6 +7,8 @@ import path from 'path';
 // Carrega as variáveis de ambiente do arquivo .env
 dotenv.config();
 
+let isRunning = false;
+
 // Recupera a URL do webhook do Discord a partir das variáveis de ambiente
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL as string;
 
@@ -104,7 +106,7 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
   }
 }
 
-// Função que processa cada notícia: utiliza a API local do Ollama para gerar o resumo e envia para o Discord
+// Função que processa cada notícia: utiliza a API lo cal do Ollama para gerar o resumo e envia para o Discord
 async function processNewsItem(news: { title: string; url: string; summary: string }): Promise<void> {
   try {
     // Define o prompt para extrair um resumo conciso
@@ -139,6 +141,11 @@ Conteúdo: ${news.summary}`;
 
 // Função principal que coordena o fluxo de extração e envio das notícias
 async function main(): Promise<void> {
+  if (isRunning) {
+    console.log('A execução anterior ainda está em andamento. Aguardando...');
+    return;
+  }
+  isRunning = true;
   console.log('Verificando novas notícias...');
   const newsItems = await scrapeNews();
   for (const news of newsItems) {
@@ -149,6 +156,7 @@ async function main(): Promise<void> {
     }
   }
   console.log('Verificação de notícias concluída.');
+  isRunning = false;
 }
 
 // Chama a função main imediatamente e agenda para ser executada a cada 1 minuto
