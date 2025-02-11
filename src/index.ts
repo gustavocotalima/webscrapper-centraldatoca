@@ -66,7 +66,7 @@ async function getFullNewsSummary(newsUrl: string): Promise<string> {
 async function runOllama(prompt: string): Promise<string> {
   try {
     const response = await axios.post('http://localhost:11434/api/generate', {
-      model: 'llama3:8b',
+      model: 'llama3.2:3b',
       prompt: prompt,
       stream: false
     });
@@ -110,9 +110,10 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
 async function processNewsItem(news: { title: string; url: string; summary: string }): Promise<void> {
   try {
     // Define o prompt para extrair um resumo conciso
-    const prompt = `Reescreva o texto da notícia para ter no máximo 1700 caracteres, deve conter todas as informações importantes. Esta notícia foi obtida via web scraping. Abaixo, o título e o conteúdo completo da notícia. Só responda o texto gerado, nenhum prelambulo, nada mais.
-Título: ${news.title}
-Conteúdo: ${news.summary}`;
+    const prompt = `Reescreva o texto da notícia para ter no máximo 1700 caracteres, deve conter todas as informações importantes. Esta notícia foi obtida via web scraping. Abaixo, o título e o conteúdo completo da notícia. O resultado deve ser apenas o resumo gerado, sem nenhuma outra informação, ocmo titulo ou pré mensagem.
+    Título: ${news.title}
+    Conteúdo: ${news.summary}
+`;
 
     // Chama a API local do Ollama
     const importantInfo = await runOllama(prompt);
