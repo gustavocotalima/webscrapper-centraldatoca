@@ -269,3 +269,99 @@ if (process.env.NODE_ENV !== 'production') {
 
 // Remove the setInterval since Vercel will use the cron job instead
 // setInterval(main, 60 * 1000);
+
+// Export individual functions for API endpoints to use
+export async function fetchNewsUrls(): Promise<Array<{ title: string; url: string }>> {
+  try {
+    const newsItems: Array<{ title: string; url: string }> = [];
+    const processedUrls = new Set<string>();
+    
+    // 1. First, scrape the homepage (may have most recent news)
+    console.log('Fetching news from homepage...');
+    const homeResponse = await axios.get(HOME_URL);
+    const $home = cheerio.load(homeResponse.data);
+    
+    const homeNewsElements = $home('div.td_module_flex.td_module_flex_1').toArray();
+    for (const element of homeNewsElements) {
+      const titleElement = $home(element).find('h3.entry-title a');
+      const title = titleElement.text().trim();
+      const url = titleElement.attr('href') || '';
+      
+      if (url && !processedUrls.has(url)) {
+        processedUrls.add(url);
+        newsItems.push({ title, url });
+      }
+    }
+    
+    // 2. Then, scrape the latest news page
+    console.log('Fetching news from latest news page...');
+    const ultimasResponse = await axios.get(ULTIMAS_URL);
+    const $ultimas = cheerio.load(ultimasResponse.data);
+    
+    const ultimasNewsElements = $ultimas('div.tdb_module_loop.td_module_wrap').toArray();
+    for (const element of ultimasNewsElements) {
+      const titleElement = $ultimas(element).find('.td-module-meta-info h3.entry-title a');
+      const title = titleElement.text().trim();
+      const url = titleElement.attr('href') || '';
+      
+      if (url && !processedUrls.has(url)) {
+        processedUrls.add(url);
+        newsItems.push({ title, url });
+      }
+    }
+    
+    console.log(`Total news items found: ${newsItems.length}`);
+    return newsItems;
+  } catch (error) {
+    console.error('Error fetching news URLs:', error);
+    return [];
+  }
+}
+
+// Function to process a single news item by URL
+export async function processOneNewsItem(url: string): Promise<boolean> {
+  try {
+    // Load processed news to check if this URL has already been processed
+    const processedNews = await loadProcessedNews();
+    
+    // Skip if already fully processed
+    if (processedNews.has(url)) {
+      console.log(`News item already processed: ${url}`);
+      return false;
+    }
+    
+    console.log(`Processing news item: ${url}`);
+    
+    // Get the full content
+    const { data } = await axios.get(url);
+    const $ = cheerio.load(data);
+    
+    // Extract title
+    const title = $('h1.entry-title').text().trim();
+    
+    // Extract content
+    let summary = $('div.td-post-content')
+      .find('p, h1, h2, h3, h4, h5, h6')
+      .map((i, el) => $(el).text())
+      .get()
+      .join('\n')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/Leia também:.*?(?=\n|$)/g, '')
+      .trim();
+    
+    // Process and send to Discord
+    await processNewsItem({ title, url, summary });
+    
+    // Mark as processed
+    processedNews.add(url);
+    await saveProcessedNews(processedNews);
+    
+    return true;
+  } catch (error) {
+    console.error(`Error processing news item ${url}:`, error);
+    return false;
+  }
+}
+
+// Export other functions needed by the API endpoints
+export { loadProcessedNews, saveProcessedNews, processNewsItem };

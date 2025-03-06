@@ -1,15 +1,55 @@
-name: Trigger News Check
+name: News Processing Workflow
 
 on:
   schedule:
-    # Run every 5 minutes
-    - cron: '*/5 * * * *'
+    # Run every 10 minutes
+    - cron: '*/10 * * * *'
   workflow_dispatch: # Allow manual triggering
 
 jobs:
-  trigger:
+  process-news:
     runs-on: ubuntu-latest
     steps:
-      - name: Call API endpoint
+      - name: Check for new articles
+        id: check
         run: |
-          curl -X GET "${{ secrets.API_URL }}api/check-news?key=${{ secrets.API_SECRET_KEY }}"
+          echo "Checking for new articles..."
+          CHECK_RESPONSE=$(curl -s "${{ secrets.API_URL }}/api/check-news?key=${{ secrets.API_SECRET_KEY }}")
+          echo "Response: $CHECK_RESPONSE"
+          echo "check_response=$CHECK_RESPONSE" >> $GITHUB_ENV
+
+      - name: Extract news items
+        id: extract
+        run: |
+          echo "Extracting news URLs..."
+          # Use jq to check if the response was successful
+          if echo "${{ env.check_response }}" | jq -e '.success == true' > /dev/null; then
+            # Get all news URLs from the temporary storage
+            NEW_ITEMS=$(curl -s "${{ secrets.API_URL }}/api/check-news?key=${{ secrets.API_SECRET_KEY }}&action=list_pending" | jq -r '.items[].url')
+            echo "Found URLs: $NEW_ITEMS"
+            echo "new_items<<EOF" >> $GITHUB_ENV
+            echo "$NEW_ITEMS" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+          else
+            echo "No new items found or check failed"
+            echo "new_items=" >> $GITHUB_ENV
+          fi
+
+      - name: Process each news item
+        id: process
+        run: |
+          if [[ -n "${{ env.new_items }}" ]]; then
+            echo "Processing news items..."
+            while IFS= read -r url; do
+              if [[ -n "$url" ]]; then
+                echo "Processing: $url"
+                PROCESS_RESPONSE=$(curl -s "${{ secrets.API_URL }}/api/process-news?key=${{ secrets.API_SECRET_KEY }}&url=$url")
+                echo "Response: $PROCESS_RESPONSE"
+                # Add a small delay to prevent rate limiting
+                sleep 2
+              fi
+            done <<< "${{ env.new_items }}"
+            echo "All news items processed"
+          else
+            echo "No news items to process"
+          fi
