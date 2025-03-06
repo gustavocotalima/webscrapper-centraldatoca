@@ -9,8 +9,9 @@ dotenv.config();
 
 let isRunning = false;
 
-// Recupera a URL do webhook do Discord a partir das variáveis de ambiente
+// Recupera as variáveis de ambiente
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL as string;
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY as string;
 
 // URLs que serão verificadas para extrair as notícias
 const ULTIMAS_URL = "https://www.centraldatoca.com.br/ultimas/";
@@ -62,19 +63,28 @@ async function getFullNewsSummary(newsUrl: string): Promise<string> {
   }
 }
 
-// Função para chamar a API do Ollama (no localhost) para gerar o resumo.
-// O endpoint utilizado é http://localhost:11434/api/generate e espera um JSON com "model" e "prompt".
-async function runOllama(prompt: string): Promise<string> {
+// Função para chamar a API do DeepSeek v3 para gerar o resumo
+async function runDeepseek(prompt: string): Promise<string> {
   try {
-    const response = await axios.post('http://localhost:11434/api/generate', {
-      model: 'llama3:8b',
-      prompt: prompt,
-      stream: false
-    });
-    // Supondo que a resposta possua o campo "response" com o texto gerado.
-    return response.data.response?.trim() || '';
+    const response = await axios.post(
+      'https://api.deepseek.com/v1/chat/completions', 
+      {
+        model: "deepseek-chat",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.5, 
+        max_tokens: 350,
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
+        },
+      }
+    );
+    
+    return response.data.choices[0].message.content.trim() || '';
   } catch (error) {
-    console.error('Erro ao chamar a API do Ollama:', error);
+    console.error('Erro ao chamar a API do DeepSeek:', error);
     throw error;
   }
 }
@@ -132,7 +142,7 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
   }
 }
 
-// Função que processa cada notícia: utiliza a API local do Ollama para gerar o resumo e envia para o Discord
+// Função que processa cada notícia: utiliza a API do DeepSeek para gerar o resumo e envia para o Discord
 async function processNewsItem(news: { title: string; url: string; summary: string }): Promise<void> {
   try {
     // Define o prompt para extrair um resumo conciso
@@ -148,8 +158,8 @@ async function processNewsItem(news: { title: string; url: string; summary: stri
     Conteúdo: ${news.summary}
     `;
 
-    // Chama a API local do Ollama
-    const importantInfo = await runOllama(prompt);
+    // Chama a API do DeepSeek
+    const importantInfo = await runDeepseek(prompt);
 
     // Monta a mensagem para o Discord com o resumo gerado
     const discordMessage = {
@@ -159,7 +169,7 @@ async function processNewsItem(news: { title: string; url: string; summary: stri
     await axios.post(DISCORD_WEBHOOK_URL, discordMessage);
     console.log(`Notícia enviada: ${news.title}`);
   } catch (error) {
-    console.error('Erro ao processar a notícia com Ollama:', error);
+    console.error('Erro ao processar a notícia com DeepSeek:', error);
     // Em caso de erro ao processar com o modelo, envia o conteúdo completo da notícia
     try {
       const discordMessage = {
