@@ -3,6 +3,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'crypto';
 
 // Carrega as variáveis de ambiente do arquivo .env
 dotenv.config();
@@ -12,6 +13,8 @@ let isRunning = false;
 // Recupera as variáveis de ambiente
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL as string;
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY as string;
+const GITHUB_GIST_TOKEN = process.env.GITHUB_GIST_TOKEN;
+const GITHUB_GIST_ID = process.env.GITHUB_GIST_ID; // Create a Gist and put its ID here
 
 // URLs que serão verificadas para extrair as notícias
 const ULTIMAS_URL = "https://www.centraldatoca.com.br/ultimas/";
@@ -32,11 +35,6 @@ if (fs.existsSync(processedNewsFilePath)) {
       processedNews = new Set();
     }
   }
-}
-
-// Função para salvar as URLs processadas no arquivo
-function saveProcessedNews() {
-  fs.writeFileSync(processedNewsFilePath, JSON.stringify(Array.from(processedNews)));
 }
 
 // Função para buscar o conteúdo completo da notícia a partir de sua URL
@@ -183,26 +181,91 @@ async function processNewsItem(news: { title: string; url: string; summary: stri
   }
 }
 
-// Função principal que coordena o fluxo de extração e envio das notícias
-async function main(): Promise<void> {
+// Instead of using local file system for storage, let's use an API (GitHub Gist as an example)
+// Replace the processedNews loading and saving functions
+async function loadProcessedNews(): Promise<Set<string>> {
+  try {
+    if (!GITHUB_GIST_ID || !GITHUB_GIST_TOKEN) {
+      console.warn('GitHub Gist credentials not found. Using in-memory storage only.');
+      return new Set<string>();
+    }
+    
+    const response = await axios.get(`https://api.github.com/gists/${GITHUB_GIST_ID}`, {
+      headers: {
+        Authorization: `token ${GITHUB_GIST_TOKEN}`,
+      },
+    });
+    
+    const content = response.data.files['processedNews.json']?.content;
+    if (content) {
+      return new Set<string>(JSON.parse(content));
+    }
+    
+    return new Set<string>();
+  } catch (error) {
+    console.error('Error loading processed news:', error);
+    return new Set<string>();
+  }
+}
+
+async function saveProcessedNews(processedNews: Set<string>): Promise<void> {
+  try {
+    if (!GITHUB_GIST_ID || !GITHUB_GIST_TOKEN) {
+      console.warn('GitHub Gist credentials not found. Changes will not be persisted.');
+      return;
+    }
+    
+    await axios.patch(
+      `https://api.github.com/gists/${GITHUB_GIST_ID}`,
+      {
+        files: {
+          'processedNews.json': {
+            content: JSON.stringify(Array.from(processedNews)),
+          },
+        },
+      },
+      {
+        headers: {
+          Authorization: `token ${GITHUB_GIST_TOKEN}`,
+        },
+      }
+    );
+  } catch (error) {
+    console.error('Error saving processed news:', error);
+  }
+}
+
+// Export the main function so it can be imported in the API route
+export async function main(): Promise<void> {
   if (isRunning) {
     console.log('A execução anterior ainda está em andamento. Aguardando...');
     return;
   }
   isRunning = true;
   console.log('Verificando novas notícias...');
+  
+  // Load the processed news from the external storage
+  const processedNews = await loadProcessedNews();
+  
   const newsItems = await scrapeNews();
   for (const news of newsItems) {
     if (!processedNews.has(news.url)) {
       await processNewsItem(news);
       processedNews.add(news.url);
-      saveProcessedNews();
     }
   }
+  
+  // Save the updated processed news back to the external storage
+  await saveProcessedNews(processedNews);
+  
   console.log('Verificação de notícias concluída.');
   isRunning = false;
 }
 
-// Chama a função main imediatamente e agenda para ser executada a cada 1 minuto
-main();
-setInterval(main, 60 * 1000);
+// For local development, you can still call main directly
+if (process.env.NODE_ENV !== 'production') {
+  main();
+}
+
+// Remove the setInterval since Vercel will use the cron job instead
+// setInterval(main, 60 * 1000);
