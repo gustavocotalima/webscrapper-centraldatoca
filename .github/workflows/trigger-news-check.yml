@@ -12,4 +12,4 @@ jobs:
     steps:
       - name: Call API endpoint
         run: |
-          curl -X GET "https://your-vercel-app.vercel.app/api/check-news?key=${{ secrets.API_SECRET_KEY }}"
+          curl -X GET "${{ secrets.API_URL }}api/check-news?key=${{ secrets.API_SECRET_KEY }}"
