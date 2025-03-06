@@ -12,8 +12,9 @@ let isRunning = false;
 // Recupera a URL do webhook do Discord a partir das variáveis de ambiente
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL as string;
 
-// URL que será verificada para extrair as notícias
-const TARGET_URL = "https://www.centraldatoca.com.br/ultimas/";
+// URLs que serão verificadas para extrair as notícias
+const ULTIMAS_URL = "https://www.centraldatoca.com.br/ultimas/";
+const HOME_URL = "https://www.centraldatoca.com.br/";
 
 // Caminho do arquivo que armazenará as URLs processadas
 const processedNewsFilePath = path.resolve(__dirname, 'processedNews.json');
@@ -66,7 +67,7 @@ async function getFullNewsSummary(newsUrl: string): Promise<string> {
 async function runOllama(prompt: string): Promise<string> {
   try {
     const response = await axios.post('http://localhost:11434/api/generate', {
-      model: 'llama3.2:3b',
+      model: 'llama3:8b',
       prompt: prompt,
       stream: false
     });
@@ -81,39 +82,71 @@ async function runOllama(prompt: string): Promise<string> {
 // Função que realiza o scraping do site e extrai as notícias com o resumo completo
 async function scrapeNews(): Promise<Array<{ title: string; url: string; summary: string }>> {
   try {
-    const { data } = await axios.get(TARGET_URL);
-    const $ = cheerio.load(data);
-
     const newsItems: Array<{ title: string; url: string; summary: string }> = [];
+    const processedUrls = new Set<string>();
     
-    const newsElements = $('div.tdb_module_loop.td_module_wrap').toArray();
-    for (const element of newsElements) {
-      const titleElement = $(element).find('.td-module-meta-info h3.entry-title a');
+    // 1. Primeiro, faz o scraping da página inicial (que pode ter notícias mais recentes)
+    console.log('Buscando notícias na página inicial...');
+    const homeResponse = await axios.get(HOME_URL);
+    const $home = cheerio.load(homeResponse.data);
+    
+    // Busca notícias na estrutura do bloco de últimas notícias da página inicial
+    const homeNewsElements = $home('div.td_module_flex.td_module_flex_1').toArray();
+    for (const element of homeNewsElements) {
+      const titleElement = $home(element).find('h3.entry-title a');
       const title = titleElement.text().trim();
       const url = titleElement.attr('href') || '';
       
-      if (url) {
+      if (url && !processedUrls.has(url)) {
+        processedUrls.add(url);
         // Busca a versão completa do conteúdo na página da notícia
         const fullSummary = await getFullNewsSummary(url);
         newsItems.push({ title, url, summary: fullSummary });
       }
     }
     
-    return newsItems.reverse();
+    // 2. Depois, faz o scraping da página de últimas notícias
+    console.log('Buscando notícias na página de últimas notícias...');
+    const ultimasResponse = await axios.get(ULTIMAS_URL);
+    const $ultimas = cheerio.load(ultimasResponse.data);
+    
+    const ultimasNewsElements = $ultimas('div.tdb_module_loop.td_module_wrap').toArray();
+    for (const element of ultimasNewsElements) {
+      const titleElement = $ultimas(element).find('.td-module-meta-info h3.entry-title a');
+      const title = titleElement.text().trim();
+      const url = titleElement.attr('href') || '';
+      
+      if (url && !processedUrls.has(url)) {
+        processedUrls.add(url);
+        // Busca a versão completa do conteúdo na página da notícia
+        const fullSummary = await getFullNewsSummary(url);
+        newsItems.push({ title, url, summary: fullSummary });
+      }
+    }
+    
+    console.log(`Total de notícias encontradas: ${newsItems.length}`);
+    return newsItems;
   } catch (error) {
     console.error('Erro ao realizar o scraping:', error);
     return [];
   }
 }
 
-// Função que processa cada notícia: utiliza a API lo cal do Ollama para gerar o resumo e envia para o Discord
+// Função que processa cada notícia: utiliza a API local do Ollama para gerar o resumo e envia para o Discord
 async function processNewsItem(news: { title: string; url: string; summary: string }): Promise<void> {
   try {
     // Define o prompt para extrair um resumo conciso
-    const prompt = `Reescreva o texto da notícia para ter no máximo 1700 caracteres, deve conter todas as informações importantes. Esta notícia foi obtida via web scraping. Abaixo, o título e o conteúdo completo da notícia. O resultado deve ser apenas o resumo gerado, sem nenhuma outra informação, ocmo titulo ou pré mensagem.
+    const prompt = `Reescreva o texto da notícia para ter no máximo 1700 caracteres, contendo apenas as informações mais importantes.
+    
+    IMPORTANTE: 
+    - NÃO repita o título no início do texto resumido
+    - O título já será exibido separadamente
+    - Comece o resumo diretamente com as informações da notícia
+    - Não mencione que é um resumo ou que a notícia foi obtida por web scraping
+    
     Título: ${news.title}
     Conteúdo: ${news.summary}
-`;
+    `;
 
     // Chama a API local do Ollama
     const importantInfo = await runOllama(prompt);
