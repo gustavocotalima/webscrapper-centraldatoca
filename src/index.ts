@@ -89,6 +89,12 @@ async function runDeepseek(prompt: string): Promise<string> {
   }
 }
 
+// Função para verificar se uma URL deve ser ignorada (por exemplo, notícias da Sada)
+function shouldIgnoreUrl(url: string): boolean {
+  // Ignora URLs que contêm "/sada/" no caminho
+  return url.includes('/sada/');
+}
+
 // Função que realiza o scraping do site e extrai as notícias com o resumo completo
 async function scrapeNews(): Promise<Array<{ title: string; url: string; summary: string }>> {
   try {
@@ -107,7 +113,8 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
       const title = titleElement.text().trim();
       const url = titleElement.attr('href') || '';
       
-      if (url && !processedUrls.has(url)) {
+      // Ignora notícias da Sada e URLs já processadas
+      if (url && !processedUrls.has(url) && !shouldIgnoreUrl(url)) {
         processedUrls.add(url);
         // Busca a versão completa do conteúdo na página da notícia
         const fullSummary = await getFullNewsSummary(url);
@@ -126,7 +133,8 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
       const title = titleElement.text().trim();
       const url = titleElement.attr('href') || '';
       
-      if (url && !processedUrls.has(url)) {
+      // Ignora notícias da Sada e URLs já processadas
+      if (url && !processedUrls.has(url) && !shouldIgnoreUrl(url)) {
         processedUrls.add(url);
         // Busca a versão completa do conteúdo na página da notícia
         const fullSummary = await getFullNewsSummary(url);
