@@ -99,16 +99,15 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
   try {
     const newsItems: Array<{ title: string; url: string; summary: string }> = [];
     const processedUrls = new Set<string>();
+
+    // 1. Depois, faz o scraping da página de últimas notícias
+    console.log('Buscando notícias na página de últimas notícias...');
+    const ultimasResponse = await axios.get(ULTIMAS_URL);
+    const $ultimas = cheerio.load(ultimasResponse.data);
     
-    // 1. Primeiro, faz o scraping da página inicial (que pode ter notícias mais recentes)
-    console.log('Buscando notícias na página inicial...');
-    const homeResponse = await axios.get(HOME_URL);
-    const $home = cheerio.load(homeResponse.data);
-    
-    // Busca notícias na estrutura do bloco de últimas notícias da página inicial
-    const homeNewsElements = $home('div.td_module_flex.td_module_flex_1').toArray();
-    for (const element of homeNewsElements) {
-      const titleElement = $home(element).find('h3.entry-title a');
+    const ultimasNewsElements = $ultimas('div.tdb_module_loop.td_module_wrap').toArray();
+    for (const element of ultimasNewsElements) {
+      const titleElement = $ultimas(element).find('.td-module-meta-info h3.entry-title a');
       const title = titleElement.text().trim();
       const url = titleElement.attr('href') || '';
       
@@ -121,14 +120,15 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
       }
     }
     
-    // 2. Depois, faz o scraping da página de últimas notícias
-    console.log('Buscando notícias na página de últimas notícias...');
-    const ultimasResponse = await axios.get(ULTIMAS_URL);
-    const $ultimas = cheerio.load(ultimasResponse.data);
+    // 2. Primeiro, faz o scraping da página inicial (que pode ter notícias mais recentes)
+    console.log('Buscando notícias na página inicial...');
+    const homeResponse = await axios.get(HOME_URL);
+    const $home = cheerio.load(homeResponse.data);
     
-    const ultimasNewsElements = $ultimas('div.tdb_module_loop.td_module_wrap').toArray();
-    for (const element of ultimasNewsElements) {
-      const titleElement = $ultimas(element).find('.td-module-meta-info h3.entry-title a');
+    // Busca notícias na estrutura do bloco de últimas notícias da página inicial
+    const homeNewsElements = $home('div.td_module_flex.td_module_flex_1').toArray();
+    for (const element of homeNewsElements) {
+      const titleElement = $home(element).find('h3.entry-title a');
       const title = titleElement.text().trim();
       const url = titleElement.attr('href') || '';
       
