@@ -1,0 +1,10 @@
+version: '3'
+
+services:
+  centraldatoca:
+    build: .
+    restart: always
+    volumes:
+      - ./src/processedNews.json:/app/src/processedNews.json
+    env_file:
+      - .env
