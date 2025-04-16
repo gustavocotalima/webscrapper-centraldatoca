@@ -91,7 +91,7 @@ async function runDeepseek(prompt: string): Promise<string> {
 
 // Função para verificar se uma URL deve ser ignorada (por exemplo, notícias da Sada)
 function shouldIgnoreUrl(url: string): boolean {
-  return url.includes('/sada/') || url.includes('/feminino/') || url.includes('/uncategorized/') || url.includes('/ex-cruzeiro/');
+  return url.includes('/sada/') || url.includes('/feminino/') || url.includes('/uncategorized/') || url.includes('/ex-cruzeiro/') || url.includes('/campeonato/');
 }
 
 // Função que realiza o scraping do site e extrai as notícias com o resumo completo
