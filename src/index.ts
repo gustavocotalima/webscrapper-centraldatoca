@@ -17,8 +17,31 @@ const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY as string;
 const ULTIMAS_URL = "https://www.centraldatoca.com.br/ultimas/";
 const HOME_URL = "https://www.centraldatoca.com.br/";
 
+// Caminhos para arquivos de persistência e configuração.
+// Quando o código é executado a partir de dist, esses arquivos permanecem em
+// ../src para que possam ser montados como volume no Docker.
+const configDir = __dirname.includes('dist') ? path.resolve(__dirname, '../src') : __dirname;
+
 // Caminho do arquivo que armazenará as URLs processadas
-const processedNewsFilePath = path.resolve(__dirname, 'processedNews.json');
+const processedNewsFilePath = path.join(configDir, 'processedNews.json');
+
+// Caminho do arquivo com filtros de URLs que devem ser ignoradas
+const ignoreUrlsFilePath = path.join(configDir, 'ignoredUrls.json');
+
+function loadIgnoreUrls(): string[] {
+  if (!fs.existsSync(ignoreUrlsFilePath)) {
+    return [];
+  }
+  try {
+    const data = fs.readFileSync(ignoreUrlsFilePath, 'utf-8').trim();
+    return data ? JSON.parse(data) : [];
+  } catch (err) {
+    console.error('Erro ao ler ignoredUrls.json. Nenhum filtro será aplicado.', err);
+    return [];
+  }
+}
+
+const ignoreUrls = loadIgnoreUrls();
 
 // Carrega as URLs processadas do arquivo (para evitar envios duplicados)
 let processedNews = new Set<string>();
@@ -91,7 +114,7 @@ async function runDeepseek(prompt: string): Promise<string> {
 
 // Função para verificar se uma URL deve ser ignorada (por exemplo, notícias da Sada)
 function shouldIgnoreUrl(url: string): boolean {
-  return url.includes('/sada/') || url.includes('/feminino/') || url.includes('/uncategorized/') || url.includes('/ex-cruzeiro/') || url.includes('/campeonato/');
+  return ignoreUrls.some(segment => url.includes(`/${segment}/`));
 }
 
 // Função que realiza o scraping do site e extrai as notícias com o resumo completo
