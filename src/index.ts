@@ -18,7 +18,33 @@ const ULTIMAS_URL = "https://www.centraldatoca.com.br/ultimas/";
 const HOME_URL = "https://www.centraldatoca.com.br/";
 
 // Caminho do arquivo que armazenará as URLs processadas
-const processedNewsFilePath = path.resolve(__dirname, 'processedNews.json');
+// Caminhos para arquivos de persistência e configuração.
+// Quando o código é executado a partir de dist, esses arquivos permanecem em
+// ../src para que possam ser montados como volume no Docker.
+const processedNewsFilePath = path.resolve(
+  __dirname,
+  __dirname.includes('dist') ? '../src/processedNews.json' : 'processedNews.json'
+);
+
+// Caminho do arquivo com filtros de URLs que devem ser ignoradas
+const ignoreUrlsFilePath = path.resolve(
+  __dirname,
+  __dirname.includes('dist') ? '../src/ignoredUrls.json' : 'ignoredUrls.json'
+);
+
+// Carrega os filtros a partir do arquivo
+let ignoreUrls: string[] = [];
+if (fs.existsSync(ignoreUrlsFilePath)) {
+  try {
+    const data = fs.readFileSync(ignoreUrlsFilePath, 'utf-8').trim();
+    if (data) {
+      ignoreUrls = JSON.parse(data);
+    }
+  } catch (err) {
+    console.error('Erro ao ler ignoredUrls.json. Nenhum filtro será aplicado.', err);
+    ignoreUrls = [];
+  }
+}
 
 // Caminho do arquivo com filtros de URLs que devem ser ignoradas
 const ignoreUrlsFilePath = path.resolve(__dirname, 'ignoredUrls.json');
