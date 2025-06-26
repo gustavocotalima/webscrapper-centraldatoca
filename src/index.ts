@@ -20,6 +20,23 @@ const HOME_URL = "https://www.centraldatoca.com.br/";
 // Caminho do arquivo que armazenará as URLs processadas
 const processedNewsFilePath = path.resolve(__dirname, 'processedNews.json');
 
+// Caminho do arquivo com filtros de URLs que devem ser ignoradas
+const ignoreUrlsFilePath = path.resolve(__dirname, 'ignoredUrls.json');
+
+// Carrega os filtros a partir do arquivo
+let ignoreUrls: string[] = [];
+if (fs.existsSync(ignoreUrlsFilePath)) {
+  try {
+    const data = fs.readFileSync(ignoreUrlsFilePath, 'utf-8').trim();
+    if (data) {
+      ignoreUrls = JSON.parse(data);
+    }
+  } catch (err) {
+    console.error('Erro ao ler ignoredUrls.json. Nenhum filtro será aplicado.', err);
+    ignoreUrls = [];
+  }
+}
+
 // Carrega as URLs processadas do arquivo (para evitar envios duplicados)
 let processedNews = new Set<string>();
 if (fs.existsSync(processedNewsFilePath)) {
@@ -91,7 +108,7 @@ async function runDeepseek(prompt: string): Promise<string> {
 
 // Função para verificar se uma URL deve ser ignorada (por exemplo, notícias da Sada)
 function shouldIgnoreUrl(url: string): boolean {
-  return url.includes('/sada/') || url.includes('/feminino/') || url.includes('/uncategorized/') || url.includes('/ex-cruzeiro/') || url.includes('/campeonato/');
+  return ignoreUrls.some(segment => url.includes(`/${segment}/`));
 }
 
 // Função que realiza o scraping do site e extrai as notícias com o resumo completo
