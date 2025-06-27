@@ -45,16 +45,17 @@ const ignoreUrls = loadIgnoreUrls();
 
 // Carrega as URLs processadas do arquivo (para evitar envios duplicados)
 let processedNews = new Set<string>();
-if (fs.existsSync(processedNewsFilePath)) {
+try {
+  if (!fs.existsSync(processedNewsFilePath) || fs.lstatSync(processedNewsFilePath).isDirectory()) {
+    fs.writeFileSync(processedNewsFilePath, '[]');
+  }
   const data = fs.readFileSync(processedNewsFilePath, 'utf-8').trim();
   if (data) {
-    try {
-      processedNews = new Set(JSON.parse(data));
-    } catch (err) {
-      console.error('Erro ao fazer parse do arquivo processedNews.json. Iniciando com um conjunto vazio.', err);
-      processedNews = new Set();
-    }
+    processedNews = new Set(JSON.parse(data));
   }
+} catch (err) {
+  console.error('Erro ao ler processedNews.json. Iniciando com um conjunto vazio.', err);
+  processedNews = new Set();
 }
 
 // Função para salvar as URLs processadas no arquivo
