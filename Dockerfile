@@ -8,17 +8,17 @@ COPY package.json pnpm-lock.yaml ./
 # Instala o pnpm
 RUN npm install -g pnpm
 
-# Instala as dependências usando pnpm
-RUN pnpm install
+# Instala as dependências
+RUN pnpm install --frozen-lockfile
 
 # Copia o código fonte
 COPY . .
 
-# Cria o diretório para os arquivos de persistência se não existir
-RUN mkdir -p src
-
 # Compila o TypeScript
-RUN pnpm exec tsc
+RUN pnpm run build
 
-# Comando para iniciar a aplicação
+# Cria o diretório src para dados em tempo de execução se não existir
+RUN mkdir -p /app/src
+
+# Inicia a aplicação
 CMD ["node", "dist/index.js"]

@@ -3,6 +3,7 @@ services:
     build: .
     restart: always
     volumes:
-      - ./src/processedNews.json:/app/src/processedNews.json
+      # Monta o diretório src inteiro para persistir arquivos de dados
+      - ./src:/app/src
     env_file:
       - .env
