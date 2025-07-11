@@ -13,6 +13,13 @@ let isRunning = false;
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL as string;
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY as string;
 
+// Valida variáveis de ambiente obrigatórias
+if (!DISCORD_WEBHOOK_URL || !DEEPSEEK_API_KEY) {
+  console.error('Erro: Variáveis de ambiente obrigatórias não configuradas.');
+  console.error('Certifique-se de que DISCORD_WEBHOOK_URL e DEEPSEEK_API_KEY estão definidas no arquivo .env');
+  process.exit(1);
+}
+
 // URLs que serão verificadas para extrair as notícias
 const ULTIMAS_URL = "https://www.centraldatoca.com.br/ultimas/";
 const HOME_URL = "https://www.centraldatoca.com.br/";
@@ -66,30 +73,64 @@ function saveProcessedNews() {
 // Função para buscar o conteúdo completo da notícia a partir de sua URL
 async function getFullNewsSummary(newsUrl: string): Promise<string> {
   try {
-    const { data } = await axios.get(newsUrl);
-    const $ = cheerio.load(data);
-    // Ajuste o seletor para capturar o conteúdo completo da notícia
-    let fullSummary = $('div.td-post-content').text().trim();
-    
-    // Extrai somente os textos dos parágrafos e cabeçalhos
-    fullSummary = $('div.td-post-content')
-      .find('p, h1, h2, h3, h4, h5, h6')
-      .map((i, el) => $(el).text())
-      .get()
-      .join('\n')
-      .replace(/\s{2,}/g, ' ')
-      .replace(/Leia também:.*?(?=\n|$)/g, '')
-      .trim();
-    return fullSummary;
+    return await retryWithBackoff(async () => {
+      const { data } = await axios.get(newsUrl, {
+        timeout: 15000, // 15 segundos de timeout
+      });
+      const $ = cheerio.load(data);
+      // Ajuste o seletor para capturar o conteúdo completo da notícia
+      let fullSummary = $('div.td-post-content').text().trim();
+      
+      // Extrai somente os textos dos parágrafos e cabeçalhos
+      fullSummary = $('div.td-post-content')
+        .find('p, h1, h2, h3, h4, h5, h6')
+        .map((i, el) => $(el).text())
+        .get()
+        .join('\n')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/Leia também:.*?(?=\n|$)/g, '')
+        .trim();
+      return fullSummary;
+    }, 2, 500); // Menos retries e delay menor para scraping
   } catch (error) {
     console.error(`Erro ao buscar o conteúdo completo da notícia em ${newsUrl}:`, error); 
     return '';
   }
 }
 
+// Função para implementar retry com exponential backoff
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  initialDelay: number = 1000
+): Promise<T> {
+  let lastError: any;
+  
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+      const delay = initialDelay * Math.pow(2, i);
+      console.error(`Tentativa ${i + 1} falhou. Tentando novamente em ${delay}ms...`);
+      
+      // Se for um erro 429 (rate limit), espera mais tempo
+      if (error.response?.status === 429) {
+        const retryAfter = error.response.headers['retry-after'];
+        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : delay * 2;
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      } else {
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  
+  throw lastError;
+}
+
 // Função para chamar a API do DeepSeek v3 para gerar o resumo
 async function runDeepseek(prompt: string): Promise<string> {
-  try {
+  return retryWithBackoff(async () => {
     const response = await axios.post(
       'https://api.deepseek.com/v1/chat/completions', 
       {
@@ -103,14 +144,12 @@ async function runDeepseek(prompt: string): Promise<string> {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
         },
+        timeout: 30000, // 30 segundos de timeout
       }
     );
     
     return response.data.choices[0].message.content.trim() || '';
-  } catch (error) {
-    console.error('Erro ao chamar a API do DeepSeek:', error);
-    throw error;
-  }
+  });
 }
 
 // Função para verificar se uma URL deve ser ignorada (por exemplo, notícias da Sada)
@@ -126,7 +165,9 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
 
     // 1. Depois, faz o scraping da página de últimas notícias
     console.log('Buscando notícias na página de últimas notícias...');
-    const ultimasResponse = await axios.get(ULTIMAS_URL);
+    const ultimasResponse = await retryWithBackoff(async () => 
+      axios.get(ULTIMAS_URL, { timeout: 15000 }), 2, 500
+    );
     const $ultimas = cheerio.load(ultimasResponse.data);
     
     const ultimasNewsElements = $ultimas('div.tdb_module_loop.td_module_wrap').toArray();
@@ -146,7 +187,9 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
     
     // 2. Primeiro, faz o scraping da página inicial (que pode ter notícias mais recentes)
     console.log('Buscando notícias na página inicial...');
-    const homeResponse = await axios.get(HOME_URL);
+    const homeResponse = await retryWithBackoff(async () => 
+      axios.get(HOME_URL, { timeout: 15000 }), 2, 500
+    );
     const $home = cheerio.load(homeResponse.data);
     
     // Busca notícias na estrutura do bloco de últimas notícias da página inicial
