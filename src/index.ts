@@ -136,7 +136,7 @@ async function runDeepseek(prompt: string): Promise<string> {
       {
         model: "deepseek-chat",
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.4, 
+        temperature: 0.2, 
         max_tokens: 500,
       },
       {
