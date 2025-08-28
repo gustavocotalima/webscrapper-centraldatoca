@@ -13,13 +13,17 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "axios": "^1.7.9",
     "cheerio": "^1.0.0",
-    "dotenv": "^16.4.7"
+    "discord.js": "^14.22.1",
+    "dotenv": "^16.4.7",
+    "openai": "^5.16.0",
+    "redis": "^5.8.2"
   },
   "devDependencies": {
     "nodemon": "^3.1.9",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3"
-  }  
+  }
 }

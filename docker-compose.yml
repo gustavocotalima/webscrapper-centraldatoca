@@ -2,8 +2,5 @@ services:
   centraldatoca:
     build: .
     restart: always
-    volumes:
-      # Monta o diretório src inteiro para persistir arquivos de dados
-      - ./src:/app/src
     env_file:
       - .env
