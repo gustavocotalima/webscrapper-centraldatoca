@@ -373,9 +373,9 @@ async function getFullNewsContent(newsUrl: string): Promise<{ summary: string; i
 }
 
 // Função que realiza o scraping do site e extrai as notícias com o resumo completo
-async function scrapeNews(): Promise<Array<{ title: string; url: string; summary: string; imageUrl?: string }>> {
+async function scrapeNews(): Promise<Array<{ title: string; url: string; summary: string; imageUrl?: string; category?: string }>> {
   try {
-    const newsItems: Array<{ title: string; url: string; summary: string; imageUrl?: string }> = [];
+    const newsItems: Array<{ title: string; url: string; summary: string; imageUrl?: string; category?: string }> = [];
     const processedUrls = new Set<string>();
 
     console.log('Buscando notícias na página de últimas notícias...');
@@ -390,10 +390,14 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
       const title = titleElement.text().trim();
       const url = titleElement.attr('href') || '';
       
+      // Extract category from URL: .com.br/category/*
+      const urlParts = new URL(url).pathname.split('/').filter(Boolean);
+      const category = urlParts[0] || '';
+      
       if (url && !processedUrls.has(url)) {
         processedUrls.add(url);
         const fullContent = await getFullNewsContent(url);
-        newsItems.push({ title, url, summary: fullContent.summary, imageUrl: fullContent.imageUrl });
+        newsItems.push({ title, url, summary: fullContent.summary, imageUrl: fullContent.imageUrl, category });
       }
     }
     
@@ -409,10 +413,14 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
       const title = titleElement.text().trim();
       const url = titleElement.attr('href') || '';
       
+      // Extract category from URL: .com.br/category/*
+      const urlParts = new URL(url).pathname.split('/').filter(Boolean);
+      const category = urlParts[0] || '';
+      
       if (url && !processedUrls.has(url)) {
         processedUrls.add(url);
         const fullContent = await getFullNewsContent(url);
-        newsItems.push({ title, url, summary: fullContent.summary, imageUrl: fullContent.imageUrl });
+        newsItems.push({ title, url, summary: fullContent.summary, imageUrl: fullContent.imageUrl, category });
       }
     }
     
@@ -425,7 +433,7 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
 }
 
 // Função que processa uma notícia e a envia imediatamente para os canais
-async function processAndSendNews(news: { title: string; url: string; summary: string; imageUrl?: string }): Promise<void> {
+async function processAndSendNews(news: { title: string; url: string; summary: string; imageUrl?: string; category?: string }): Promise<void> {
   try {
     // Check if this URL is ignored by ALL servers before AI processing
     const ignoredByAll = await isUrlIgnoredByAllServers(news.url);
@@ -456,7 +464,7 @@ async function processAndSendNews(news: { title: string; url: string; summary: s
     }
 
     // Send to all configured channels immediately
-    await sendNewsToAllChannels(news.title, processedSummary, news.url, news.imageUrl);
+    await sendNewsToAllChannels(news.title, processedSummary, news.url, news.imageUrl, news.category);
     
   } catch (error) {
     console.error('Erro ao processar e enviar notícia:', error);
@@ -999,7 +1007,7 @@ async function handleHelpCommand(interaction: any) {
 }
 
 // Send single news item to all configured channels
-async function sendNewsToAllChannels(title: string, summary: string, url: string, imageUrl?: string): Promise<void> {
+async function sendNewsToAllChannels(title: string, summary: string, url: string, imageUrl?: string, category?: string): Promise<void> {
   const guilds = client.guilds.cache.values();
   let sentCount = 0;
 
@@ -1017,23 +1025,31 @@ async function sendNewsToAllChannels(title: string, summary: string, url: string
       }
 
       try {
-        // Create simple message format: Title + Summary + Link
-        let message = `**${title}**\n\n${summary}\n\n🔗 ${url}`;
-        
-        // If we have an image, send it as attachment/embed
-        const messageOptions: any = { content: message };
-        
-        if (imageUrl) {
-          // Try to send with embed for image
-          try {
-            const embed = new EmbedBuilder().setImage(imageUrl);
-            messageOptions.embeds = [embed];
-          } catch (imgError) {
-            console.log('Erro ao adicionar imagem, enviando sem:', imgError);
-          }
+        // Create rich embed format
+        const embed = new EmbedBuilder()
+          .setAuthor({ 
+            name: 'Central da Toca',
+            iconURL: 'https://www.centraldatoca.com.br/wp-content/uploads/2025/01/cropped-Favicon-Azul-32x32.png',
+            url: 'https://www.centraldatoca.com.br'
+          })
+          .setTitle(title)
+          .setURL(url)
+          .setDescription(summary)
+          .setColor(0x00AE86)
+          .setTimestamp();
+
+        // Add category as footer with capitalized first letter and spaces instead of dashes
+        if (category) {
+          const formattedCategory = category.replace(/-/g, ' ').charAt(0).toUpperCase() + category.replace(/-/g, ' ').slice(1);
+          embed.setFooter({ text: formattedCategory });
         }
 
-        await (channel as any).send(messageOptions);
+        // Add image if available
+        if (imageUrl) {
+          embed.setImage(imageUrl);
+        }
+
+        await (channel as any).send({ embeds: [embed] });
         console.log(`📤 Notícia enviada para ${guild.name}: ${title}`);
         sentCount++;
         
