@@ -264,7 +264,7 @@ async function callAIModel(prompt: string): Promise<string> {
 
   return retryWithBackoff(async () => {
     switch (modelConfig.provider) {
-      case 'deepseek':
+      case 'deepseek': {
         const deepseekResponse = await axios.post(
           'https://api.deepseek.com/v1/chat/completions',
           {
@@ -283,8 +283,9 @@ async function callAIModel(prompt: string): Promise<string> {
           }
         );
         return deepseekResponse.data.choices[0].message.content.trim() || '';
+      }
 
-      case 'openai':
+      case 'openai': {
         if (!openai) throw new Error('OpenAI API key não configurada');
         if (!modelConfig.model) throw new Error('Modelo OpenAI não especificado');
         const openaiResponse = await openai.chat.completions.create({
@@ -295,8 +296,9 @@ async function callAIModel(prompt: string): Promise<string> {
           top_p: settings.top_p
         });
         return openaiResponse.choices[0]?.message?.content?.trim() || '';
+      }
 
-      case 'google':
+      case 'google': {
         if (!googleAI) throw new Error('Google AI API key não configurada');
         if (!modelConfig.model) throw new Error('Modelo Google não especificado');
         const geminiModel = googleAI.getGenerativeModel({ 
@@ -309,6 +311,7 @@ async function callAIModel(prompt: string): Promise<string> {
         });
         const geminiResponse = await geminiModel.generateContent(prompt);
         return geminiResponse.response.text().trim() || '';
+      }
 
       default:
         throw new Error(`Provider não suportado: ${modelConfig.provider}`);
@@ -438,6 +441,7 @@ async function processAndSendNews(news: { title: string; url: string; summary: s
     - O título já será exibido separadamente
     - Comece o resumo diretamente com as informações da notícia
     - Não mencione que é um resumo ou que a notícia foi obtida por web scraping
+    - A informação mais importante da noticia está diretamente ligada ao título, então garanta que sua resposta esteja alinhada com ele, sendo mais acurada e focada ao que diz o título
     
     Título: ${news.title}
     Conteúdo: ${news.summary}
@@ -653,7 +657,7 @@ async function handleSlashCommand(interaction: any) {
   const { commandName, options } = interaction;
 
   switch (commandName) {
-    case 'model':
+    case 'model': {
       if (!isBotOwner(interaction.user.id)) {
         return interaction.reply({ 
           content: '❌ Apenas o proprietário do bot pode gerenciar modelos de AI.', 
@@ -662,8 +666,9 @@ async function handleSlashCommand(interaction: any) {
       }
       await handleModelCommand(interaction, options);
       break;
+    }
 
-    case 'processed':
+    case 'processed': {
       if (!isBotOwner(interaction.user.id)) {
         return interaction.reply({ 
           content: '❌ Apenas o proprietário do bot pode gerenciar URLs processadas.', 
@@ -672,8 +677,9 @@ async function handleSlashCommand(interaction: any) {
       }
       await handleProcessedCommand(interaction, options);
       break;
+    }
 
-    case 'channel':
+    case 'channel': {
       if (!isServerAdmin(interaction.member)) {
         return interaction.reply({ 
           content: '❌ Apenas administradores do servidor podem configurar o canal.', 
@@ -682,8 +688,9 @@ async function handleSlashCommand(interaction: any) {
       }
       await handleChannelCommand(interaction, options);
       break;
+    }
 
-    case 'ignore':
+    case 'ignore': {
       if (!isServerAdmin(interaction.member)) {
         return interaction.reply({ 
           content: '❌ Apenas administradores do servidor podem gerenciar URLs ignoradas.', 
@@ -692,14 +699,17 @@ async function handleSlashCommand(interaction: any) {
       }
       await handleIgnoreCommand(interaction, options);
       break;
+    }
 
-    case 'info':
+    case 'info': {
       await handleInfoCommand(interaction);
       break;
+    }
 
-    case 'help':
+    case 'help': {
       await handleHelpCommand(interaction);
       break;
+    }
   }
 }
 
@@ -707,7 +717,7 @@ async function handleModelCommand(interaction: any, options: any) {
   const subcommand = options.getSubcommand();
 
   switch (subcommand) {
-    case 'set':
+    case 'set': {
       const model = options.getString('model');
       const temperature = options.getNumber('temperature');
       const maxTokens = options.getInteger('max_tokens');
@@ -736,8 +746,9 @@ async function handleModelCommand(interaction: any, options: any) {
 
       await interaction.reply({ content: response, flags: MessageFlags.Ephemeral });
       break;
+    }
 
-    case 'current':
+    case 'current': {
       const currentModel = await getCurrentModel();
       const settings = await getModelSettings();
       const currentConfig = MODELS[currentModel as keyof typeof MODELS];
@@ -751,26 +762,26 @@ async function handleModelCommand(interaction: any, options: any) {
           { name: 'Temperature', value: settings.temperature.toString(), inline: true },
           { name: 'Max Tokens', value: settings.max_tokens.toString(), inline: true },
           { name: 'Top P', value: settings.top_p.toString(), inline: true }
-        )
-        .setColor(0x00AE86);
+        );
 
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       break;
+    }
 
-    case 'list':
+    case 'list': {
       const modelsList = Object.entries(MODELS)
         .map(([key, model]) => `• **${model.displayName}** (${model.provider})`)
         .join('\n');
 
       const listEmbed = new EmbedBuilder()
         .setTitle('📋 Modelos Disponíveis')
-        .setDescription(modelsList)
-        .setColor(0x00AE86);
+        .setDescription(modelsList);
 
       await interaction.reply({ embeds: [listEmbed], flags: MessageFlags.Ephemeral });
       break;
+    }
 
-    case 'tune':
+    case 'tune': {
       const tuneSettings: any = {};
       const newTemp = options.getNumber('temperature');
       const newMaxTokens = options.getInteger('max_tokens');
@@ -796,6 +807,7 @@ async function handleModelCommand(interaction: any, options: any) {
 
       await interaction.reply({ content: tuneResponse, flags: MessageFlags.Ephemeral });
       break;
+    }
   }
 }
 
@@ -803,21 +815,23 @@ async function handleProcessedCommand(interaction: any, options: any) {
   const subcommand = options.getSubcommand();
 
   switch (subcommand) {
-    case 'count':
+    case 'count': {
       const count = await getProcessedUrlsCount();
       await interaction.reply({ 
         content: `📊 Total de URLs processadas: **${count}**`, 
         flags: MessageFlags.Ephemeral 
       });
       break;
+    }
 
-    case 'clear':
+    case 'clear': {
       await clearProcessedUrls();
       await interaction.reply({ 
         content: '✅ Todas as URLs processadas foram removidas.', 
         flags: MessageFlags.Ephemeral 
       });
       break;
+    }
   }
 }
 
@@ -825,7 +839,7 @@ async function handleChannelCommand(interaction: any, options: any) {
   const subcommand = options.getSubcommand();
 
   switch (subcommand) {
-    case 'set':
+    case 'set': {
       const channel = options.getChannel('channel');
       await setServerChannel(interaction.guildId, channel.id);
       await interaction.reply({ 
@@ -833,8 +847,9 @@ async function handleChannelCommand(interaction: any, options: any) {
         flags: MessageFlags.Ephemeral 
       });
       break;
+    }
 
-    case 'current':
+    case 'current': {
       const channelId = await getServerChannel(interaction.guildId);
       if (channelId) {
         const channel = interaction.guild.channels.cache.get(channelId);
@@ -849,6 +864,7 @@ async function handleChannelCommand(interaction: any, options: any) {
         });
       }
       break;
+    }
   }
 }
 
@@ -856,7 +872,7 @@ async function handleIgnoreCommand(interaction: any, options: any) {
   const subcommand = options.getSubcommand();
 
   switch (subcommand) {
-    case 'add':
+    case 'add': {
       const addPattern = options.getString('pattern').toLowerCase();
       const currentIgnoreUrls = await getServerIgnoreUrls(interaction.guildId);
       
@@ -874,8 +890,9 @@ async function handleIgnoreCommand(interaction: any, options: any) {
         flags: MessageFlags.Ephemeral 
       });
       break;
+    }
 
-    case 'remove':
+    case 'remove': {
       const removePattern = options.getString('pattern').toLowerCase();
       const ignoreUrls = await getServerIgnoreUrls(interaction.guildId);
       const index = ignoreUrls.indexOf(removePattern);
@@ -894,8 +911,9 @@ async function handleIgnoreCommand(interaction: any, options: any) {
         flags: MessageFlags.Ephemeral 
       });
       break;
+    }
 
-    case 'list':
+    case 'list': {
       const listIgnoreUrls = await getServerIgnoreUrls(interaction.guildId);
       const listText = listIgnoreUrls.length > 0 
         ? listIgnoreUrls.map(pattern => `• ${pattern}`).join('\n')
@@ -908,6 +926,7 @@ async function handleIgnoreCommand(interaction: any, options: any) {
 
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       break;
+    }
   }
 }
 
@@ -931,7 +950,6 @@ async function handleInfoCommand(interaction: any) {
       { name: '🚫 URLs Ignoradas', value: ignoreUrls.length > 0 ? ignoreUrls.join(', ') : 'Nenhuma', inline: true },
       { name: '📈 URLs Processadas', value: processedCount.toString(), inline: true }
     )
-    .setColor(0x00AE86)
     .setFooter({ text: 'Central da Toca News Bot' });
 
   await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
@@ -975,8 +993,7 @@ async function handleHelpCommand(interaction: any) {
 
   const embed = new EmbedBuilder()
     .setTitle('🤖 Central da Toca News Bot - Ajuda')
-    .setDescription(helpText)
-    .setColor(0x00AE86);
+    .setDescription(helpText);
 
   await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
@@ -1009,10 +1026,7 @@ async function sendNewsToAllChannels(title: string, summary: string, url: string
         if (imageUrl) {
           // Try to send with embed for image
           try {
-            const embed = new EmbedBuilder()
-              .setImage(imageUrl)
-              .setColor(0x00AE86);
-            
+            const embed = new EmbedBuilder().setImage(imageUrl);
             messageOptions.embeds = [embed];
           } catch (imgError) {
             console.log('Erro ao adicionar imagem, enviando sem:', imgError);
