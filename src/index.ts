@@ -1035,7 +1035,7 @@ async function sendNewsToAllChannels(title: string, summary: string, url: string
           .setTitle(title)
           .setURL(url)
           .setDescription(summary)
-          .setColor(0x00AE86)
+          .setColor(0x0F3BAA)
           .setTimestamp();
 
         // Add category as footer with capitalized first letter and spaces instead of dashes
