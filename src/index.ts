@@ -410,10 +410,16 @@ async function getFullNewsContent(newsUrl: string): Promise<{ summary: string; i
       });
       const $ = cheerio.load(data);
       
-      // Extract text content
+      // Extract text content including lists and bullet points
       let fullSummary = $('div.td-post-content')
-        .find('p, h1, h2, h3, h4, h5, h6')
-        .map((i, el) => $(el).text())
+        .find('p, h1, h2, h3, h4, h5, h6, ul, ol, li')
+        .map((i, el) => {
+          const $el = $(el);
+          if ($el.is('li')) {
+            return '• ' + $el.text().trim();
+          }
+          return $el.text().trim();
+        })
         .get()
         .join('\n')
         .replace(/\s{2,}/g, ' ')
@@ -532,6 +538,8 @@ async function processAndSendNews(news: { title: string; url: string; summary: s
     - Comece o resumo diretamente com as informações da notícia
     - Não mencione que é um resumo ou que a notícia foi obtida por web scraping
     - A informação mais importante da noticia está diretamente ligada ao título, então garanta que sua resposta esteja alinhada com ele, sendo mais acurada e focada ao que diz o título
+    - PRESERVE listas importantes como canais de TV, horários, locais de transmissão - essas informações são cruciais para os leitores
+    - Mantenha informações de listas usando bullet points (•) quando relevantes
     
     Título: ${news.title}
     Conteúdo: ${news.summary}
