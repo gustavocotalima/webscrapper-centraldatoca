@@ -5,13 +5,15 @@ A Discord bot that monitors news from Central da Toca website and sends AI-power
 ## Features
 
 - 🤖 **Multi-server Discord bot** with slash commands
+- 📺 **Multi-channel support** - configure multiple channels per server
+- 🏷️ **Category allowlists** - filter news by category per channel
 - 🧠 **Multiple AI models** support (DeepSeek, Google Gemini, OpenAI GPT)
 - 📰 **Rich Discord embeds** with clickable titles, images, and categories
 - 🔄 **Automatic news monitoring** every 60 seconds
 - 🗃️ **Redis persistence** to prevent duplicate news on deployments
 - ⚡ **Immediate sending** - news sent as soon as processed
 - 🖼️ **Image extraction** from news articles
-- 🎯 **Per-server configuration** with channel and ignore patterns
+- 🎯 **Advanced filtering** with per-channel allowlists and server ignore patterns
 - 👑 **Role-based permissions** (bot owner vs server admin)
 
 ## Bot Commands
@@ -21,11 +23,22 @@ A Discord bot that monitors news from Central da Toca website and sends AI-power
 - `/help` - Show available commands
 
 ### Server Admin Commands (requires Administrator permission)
-- `/channel set` - Set channel to receive news notifications
-- `/channel current` - Show current configured channel
-- `/ignore add` - Add URL pattern to ignore (e.g., "sada", "feminino")
+
+**Channel Management:**
+- `/channel add` - Add channel to receive news notifications
+- `/channel remove` - Remove channel from news notifications
+- `/channel list` - List all configured channels
+
+**Global Filters:**
+- `/ignore add` - Add URL pattern to ignore server-wide (e.g., "sada", "feminino")
 - `/ignore remove` - Remove URL pattern from ignore list
 - `/ignore list` - List all ignored URL patterns
+
+**Per-Channel Allowlists:**
+- `/allowlist add <channel> <category>` - Allow specific category for a channel
+- `/allowlist remove <channel> <category>` - Remove category from channel allowlist
+- `/allowlist list <channel>` - Show allowed categories for a channel
+- `/allowlist clear <channel>` - Clear allowlist (allow all categories)
 
 ### Bot Owner Commands (requires BOT_OWNER_USER_ID)
 - `/model set` - Change AI model and settings
@@ -79,11 +92,18 @@ docker-compose up -d
 
 ## Architecture
 
-- **Multi-server support**: Each server has independent channel and ignore pattern configuration
-- **Redis persistence**: Stores processed URLs, server settings, and AI model configuration
+- **Multi-channel system**: Configure multiple channels per server for different news categories
+- **Smart filtering**: Per-channel allowlists override server-wide ignore patterns
+- **Redis persistence**: Stores processed URLs, multi-channel configuration, and AI model settings
 - **AI model switching**: Bot owner can switch between different AI providers and models
 - **Immediate processing**: News articles are sent immediately after AI processing (no batching)
 - **Rich embeds**: News displayed with Central da Toca branding, clickable titles, and extracted images
+
+## Filtering Logic
+
+1. **Channel has allowlist**: Only news matching allowlisted categories are sent
+2. **Channel has no allowlist**: Uses server-wide ignore patterns
+3. **Priority**: Allowlists override ignore patterns for maximum flexibility
 
 ## News Format
 
@@ -112,3 +132,33 @@ Each news article is sent as a Discord embed with:
 - Cheerio for web scraping
 - Axios for HTTP requests
 - Supports ES2020+ features
+
+## Usage Examples
+
+### Multi-Channel Setup
+```
+# Add channels
+/channel add #football
+/channel add #basketball
+/channel add #general-news
+
+# Configure category filtering
+/allowlist add #football futebol
+/allowlist add #basketball basquete
+# #general-news gets all news (no allowlist)
+
+# Result:
+# - #football: Only soccer/football news
+# - #basketball: Only basketball news  
+# - #general-news: All news (unless server has ignore patterns)
+```
+
+### Server-Wide Filtering
+```
+# Ignore specific categories across all channels
+/ignore add feminino
+/ignore add sada
+
+# Channels without allowlists will respect these ignore patterns
+# Channels with allowlists override these patterns
+```

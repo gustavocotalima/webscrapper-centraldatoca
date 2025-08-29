@@ -61,20 +61,71 @@ redis.on('ready', () => console.log('Redis pronto para uso'));
 redis.on('end', () => console.log('Conexão com Redis encerrada'));
 
 // Multi-server Redis functions
-async function getServerChannel(guildId: string): Promise<string | null> {
+async function getServerChannels(guildId: string): Promise<string[]> {
   try {
-    return await redis.get(`server:${guildId}:channel`);
+    const channels = await redis.sMembers(`server:${guildId}:channels`);
+    return Array.isArray(channels) ? channels.filter((ch): ch is string => typeof ch === 'string') : [];
   } catch (err) {
-    console.error('Erro ao buscar canal do servidor:', err);
-    return null;
+    console.error('Erro ao buscar canais do servidor:', err);
+    return [];
   }
 }
 
-async function setServerChannel(guildId: string, channelId: string): Promise<void> {
+async function addServerChannel(guildId: string, channelId: string): Promise<void> {
   try {
-    await redis.set(`server:${guildId}:channel`, channelId);
+    await redis.sAdd(`server:${guildId}:channels`, channelId);
   } catch (err) {
-    console.error('Erro ao definir canal do servidor:', err);
+    console.error('Erro ao adicionar canal do servidor:', err);
+  }
+}
+
+async function removeServerChannel(guildId: string, channelId: string): Promise<void> {
+  try {
+    await redis.sRem(`server:${guildId}:channels`, channelId);
+    // Also remove channel-specific allowlist
+    await redis.del(`server:${guildId}:channel:${channelId}:allowlist`);
+  } catch (err) {
+    console.error('Erro ao remover canal do servidor:', err);
+  }
+}
+
+async function getChannelAllowlist(guildId: string, channelId: string): Promise<string[]> {
+  try {
+    const data = await redis.get(`server:${guildId}:channel:${channelId}:allowlist`);
+    return data ? JSON.parse(data) : [];
+  } catch (err) {
+    console.error('Erro ao buscar allowlist do canal:', err);
+    return [];
+  }
+}
+
+async function setChannelAllowlist(guildId: string, channelId: string, allowlist: string[]): Promise<void> {
+  try {
+    await redis.set(`server:${guildId}:channel:${channelId}:allowlist`, JSON.stringify(allowlist));
+  } catch (err) {
+    console.error('Erro ao definir allowlist do canal:', err);
+  }
+}
+
+async function addToChannelAllowlist(guildId: string, channelId: string, category: string): Promise<void> {
+  try {
+    const currentAllowlist = await getChannelAllowlist(guildId, channelId);
+    if (!currentAllowlist.includes(category)) {
+      currentAllowlist.push(category);
+      await setChannelAllowlist(guildId, channelId, currentAllowlist);
+    }
+  } catch (err) {
+    console.error('Erro ao adicionar categoria à allowlist:', err);
+  }
+}
+
+async function removeFromChannelAllowlist(guildId: string, channelId: string, category: string): Promise<void> {
+  try {
+    const currentAllowlist = await getChannelAllowlist(guildId, channelId);
+    const updatedAllowlist = currentAllowlist.filter(c => c !== category);
+    await setChannelAllowlist(guildId, channelId, updatedAllowlist);
+  } catch (err) {
+    console.error('Erro ao remover categoria da allowlist:', err);
   }
 }
 
@@ -203,9 +254,9 @@ async function isUrlIgnoredByAllServers(url: string): Promise<boolean> {
     if (guilds.size === 0) return false; // No servers = don't ignore
     
     for (const guild of guilds.values()) {
-      const channelId = await getServerChannel(guild.id);
-      if (channelId) {
-        // This server has a configured channel
+      const channels = await getServerChannels(guild.id);
+      if (channels.length > 0) {
+        // This server has configured channels
         const isIgnored = await shouldIgnoreUrlForServer(url, guild.id);
         if (!isIgnored) {
           // At least one server doesn't ignore this URL
@@ -491,7 +542,7 @@ client.on('guildCreate', async (guild) => {
     .find(c => c.permissionsFor(guild.members.me!)?.has(PermissionFlagsBits.SendMessages));
     
   if (defaultChannel) {
-    await setServerChannel(guild.id, defaultChannel.id);
+    await addServerChannel(guild.id, defaultChannel.id);
     console.log(`Canal padrão definido para ${guild.name}: ${defaultChannel.name}`);
   }
   
@@ -600,12 +651,12 @@ async function registerSlashCommands() {
     // Server Admin Commands
     new SlashCommandBuilder()
       .setName('channel')
-      .setDescription('Configurar canal de notícias (apenas administradores)')
+      .setDescription('Gerenciar canais de notícias (apenas administradores)')
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .addSubcommand(subcommand =>
         subcommand
-          .setName('set')
-          .setDescription('Definir canal para receber notícias')
+          .setName('add')
+          .setDescription('Adicionar canal para receber notícias')
           .addChannelOption(option =>
             option.setName('channel')
               .setDescription('Canal para receber as notícias')
@@ -614,7 +665,20 @@ async function registerSlashCommands() {
           )
       )
       .addSubcommand(subcommand =>
-        subcommand.setName('current').setDescription('Mostrar canal atual')
+        subcommand
+          .setName('remove')
+          .setDescription('Remover canal de recebimento de notícias')
+          .addChannelOption(option =>
+            option.setName('channel')
+              .setDescription('Canal a ser removido')
+              .setRequired(true)
+              .addChannelTypes(ChannelType.GuildText)
+          )
+      )
+      .addSubcommand(subcommand =>
+        subcommand
+          .setName('list')
+          .setDescription('Listar canais configurados para notícias')
       ),
 
     new SlashCommandBuilder()
@@ -643,6 +707,65 @@ async function registerSlashCommands() {
       )
       .addSubcommand(subcommand =>
         subcommand.setName('list').setDescription('Listar padrões de URL ignorados')
+      ),
+
+    new SlashCommandBuilder()
+      .setName('allowlist')
+      .setDescription('Gerenciar categorias permitidas por canal (apenas administradores)')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addSubcommand(subcommand =>
+        subcommand
+          .setName('add')
+          .setDescription('Adicionar categoria à allowlist do canal')
+          .addChannelOption(option =>
+            option.setName('channel')
+              .setDescription('Canal para configurar')
+              .setRequired(true)
+              .addChannelTypes(ChannelType.GuildText)
+          )
+          .addStringOption(option =>
+            option.setName('category')
+              .setDescription('Categoria a ser permitida (ex: futebol, basquete)')
+              .setRequired(true)
+          )
+      )
+      .addSubcommand(subcommand =>
+        subcommand
+          .setName('remove')
+          .setDescription('Remover categoria da allowlist do canal')
+          .addChannelOption(option =>
+            option.setName('channel')
+              .setDescription('Canal para configurar')
+              .setRequired(true)
+              .addChannelTypes(ChannelType.GuildText)
+          )
+          .addStringOption(option =>
+            option.setName('category')
+              .setDescription('Categoria a ser removida')
+              .setRequired(true)
+          )
+      )
+      .addSubcommand(subcommand =>
+        subcommand
+          .setName('list')
+          .setDescription('Listar allowlist de um canal')
+          .addChannelOption(option =>
+            option.setName('channel')
+              .setDescription('Canal para listar')
+              .setRequired(true)
+              .addChannelTypes(ChannelType.GuildText)
+          )
+      )
+      .addSubcommand(subcommand =>
+        subcommand
+          .setName('clear')
+          .setDescription('Limpar allowlist de um canal')
+          .addChannelOption(option =>
+            option.setName('channel')
+              .setDescription('Canal para limpar')
+              .setRequired(true)
+              .addChannelTypes(ChannelType.GuildText)
+          )
       ),
 
     // Public Commands
@@ -706,6 +829,17 @@ async function handleSlashCommand(interaction: any) {
         });
       }
       await handleIgnoreCommand(interaction, options);
+      break;
+    }
+
+    case 'allowlist': {
+      if (!isServerAdmin(interaction.member)) {
+        return interaction.reply({ 
+          content: '❌ Apenas administradores do servidor podem gerenciar allowlists.', 
+          flags: MessageFlags.Ephemeral 
+        });
+      }
+      await handleAllowlistCommand(interaction, options);
       break;
     }
 
@@ -847,22 +981,32 @@ async function handleChannelCommand(interaction: any, options: any) {
   const subcommand = options.getSubcommand();
 
   switch (subcommand) {
-    case 'set': {
+    case 'add': {
       const channel = options.getChannel('channel');
-      await setServerChannel(interaction.guildId, channel.id);
+      await addServerChannel(interaction.guildId, channel.id);
       await interaction.reply({ 
-        content: `✅ Canal de notícias definido para ${channel}`, 
+        content: `✅ Canal ${channel} adicionado para receber notícias`, 
         flags: MessageFlags.Ephemeral 
       });
       break;
     }
 
-    case 'current': {
-      const channelId = await getServerChannel(interaction.guildId);
-      if (channelId) {
-        const channel = interaction.guild.channels.cache.get(channelId);
+    case 'remove': {
+      const channel = options.getChannel('channel');
+      await removeServerChannel(interaction.guildId, channel.id);
+      await interaction.reply({ 
+        content: `✅ Canal ${channel} removido da lista de notícias`, 
+        flags: MessageFlags.Ephemeral 
+      });
+      break;
+    }
+
+    case 'list': {
+      const channels = await getServerChannels(interaction.guildId);
+      if (channels.length > 0) {
+        const channelMentions = channels.map(id => `<#${id}>`).join('\n');
         await interaction.reply({ 
-          content: `📍 Canal atual: ${channel || 'Canal não encontrado'}`, 
+          content: `📍 Canais configurados:\n${channelMentions}`, 
           flags: MessageFlags.Ephemeral 
         });
       } else {
@@ -873,6 +1017,7 @@ async function handleChannelCommand(interaction: any, options: any) {
       }
       break;
     }
+
   }
 }
 
@@ -938,15 +1083,76 @@ async function handleIgnoreCommand(interaction: any, options: any) {
   }
 }
 
+async function handleAllowlistCommand(interaction: any, options: any) {
+  const subcommand = options.getSubcommand();
+
+  switch (subcommand) {
+    case 'add': {
+      const channel = options.getChannel('channel');
+      const category = options.getString('category').toLowerCase();
+      await addToChannelAllowlist(interaction.guildId, channel.id, category);
+      await interaction.reply({ 
+        content: `✅ Categoria "${category}" adicionada à allowlist do canal ${channel}`, 
+        flags: MessageFlags.Ephemeral 
+      });
+      break;
+    }
+
+    case 'remove': {
+      const channel = options.getChannel('channel');
+      const category = options.getString('category').toLowerCase();
+      await removeFromChannelAllowlist(interaction.guildId, channel.id, category);
+      await interaction.reply({ 
+        content: `✅ Categoria "${category}" removida da allowlist do canal ${channel}`, 
+        flags: MessageFlags.Ephemeral 
+      });
+      break;
+    }
+
+    case 'list': {
+      const channel = options.getChannel('channel');
+      const allowlist = await getChannelAllowlist(interaction.guildId, channel.id);
+      const listText = allowlist.length > 0 
+        ? allowlist.map(category => `• ${category}`).join('\n')
+        : 'Nenhuma categoria na allowlist (todas as notícias serão enviadas).';
+
+      const embed = new EmbedBuilder()
+        .setTitle(`✅ Allowlist do canal ${channel.name}`)
+        .setDescription(listText)
+        .setColor(0x4CAF50);
+
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      break;
+    }
+
+    case 'clear': {
+      const channel = options.getChannel('channel');
+      await setChannelAllowlist(interaction.guildId, channel.id, []);
+      await interaction.reply({ 
+        content: `✅ Allowlist do canal ${channel} foi limpa`, 
+        flags: MessageFlags.Ephemeral 
+      });
+      break;
+    }
+  }
+}
+
 async function handleInfoCommand(interaction: any) {
   const currentModel = await getCurrentModel();
   const settings = await getModelSettings();
   const modelConfig = MODELS[currentModel];
-  const channelId = await getServerChannel(interaction.guildId);
+  
+  const channels = await getServerChannels(interaction.guildId);
   const ignoreUrls = await getServerIgnoreUrls(interaction.guildId);
   const processedCount = await getProcessedUrlsCount();
 
-  const channel = channelId ? interaction.guild.channels.cache.get(channelId) : null;
+  // Format channels information
+  const channelsInfo = channels.length > 0 
+    ? channels.map(id => {
+        const channel = interaction.guild.channels.cache.get(id);
+        return channel ? `<#${id}>` : 'Não encontrado';
+      }).join(', ')
+    : 'Nenhum configurado';
 
   const embed = new EmbedBuilder()
     .setTitle('ℹ️ Informações do Bot')
@@ -954,7 +1160,7 @@ async function handleInfoCommand(interaction: any) {
       { name: '🤖 Modelo AI Atual', value: modelConfig.displayName, inline: true },
       { name: '🎛️ Temperature', value: settings.temperature.toString(), inline: true },
       { name: '📊 Max Tokens', value: settings.max_tokens.toString(), inline: true },
-      { name: '📍 Canal de Notícias', value: channel ? channel.toString() : 'Não configurado', inline: true },
+      { name: '📍 Canais de Notícias', value: channelsInfo, inline: false },
       { name: '🚫 URLs Ignoradas', value: ignoreUrls.length > 0 ? ignoreUrls.join(', ') : 'Nenhuma', inline: true },
       { name: '📈 URLs Processadas', value: processedCount.toString(), inline: true }
     )
@@ -977,11 +1183,19 @@ async function handleHelpCommand(interaction: any) {
   // Admin commands
   if (isAdmin) {
     helpText += '**👑 Comandos de Administrador:**\n';
-    helpText += '• `/channel set` - Definir canal para receber notícias\n';
-    helpText += '• `/channel current` - Mostrar canal atual\n';
+    helpText += '**Canais:**\n';
+    helpText += '• `/channel add` - Adicionar canal para receber notícias\n';
+    helpText += '• `/channel remove` - Remover canal de notícias\n';
+    helpText += '• `/channel list` - Listar canais configurados\n';
+    helpText += '**Filtros Globais:**\n';
     helpText += '• `/ignore add` - Adicionar padrão de URL ignorado\n';
     helpText += '• `/ignore remove` - Remover padrão de URL ignorado\n';
-    helpText += '• `/ignore list` - Listar padrões ignorados\n\n';
+    helpText += '• `/ignore list` - Listar padrões ignorados\n';
+    helpText += '**Allowlists (por canal):**\n';
+    helpText += '• `/allowlist add` - Adicionar categoria à allowlist\n';
+    helpText += '• `/allowlist remove` - Remover categoria da allowlist\n';
+    helpText += '• `/allowlist list` - Ver allowlist do canal\n';
+    helpText += '• `/allowlist clear` - Limpar allowlist do canal\n\n';
   }
 
   // Owner commands
@@ -1013,48 +1227,61 @@ async function sendNewsToAllChannels(title: string, summary: string, url: string
 
   for (const guild of guilds) {
     try {
-      const channelId = await getServerChannel(guild.id);
-      if (!channelId) continue;
+      const channels = await getServerChannels(guild.id);
+      if (channels.length === 0) continue; // No channels configured
 
-      const channel = guild.channels.cache.get(channelId);
-      if (!channel || channel.type !== ChannelType.GuildText) continue;
+      // Process each channel in this server
+      for (const channelId of channels) {
+        const channel = guild.channels.cache.get(channelId);
+        if (!channel || channel.type !== ChannelType.GuildText) continue;
 
-      // Check if this server ignores this URL
-      if (await shouldIgnoreUrlForServer(url, guild.id)) {
-        continue; // Skip this server
-      }
-
-      try {
-        // Create rich embed format
-        const embed = new EmbedBuilder()
-          .setAuthor({ 
-            name: 'Central da Toca',
-            iconURL: 'https://www.centraldatoca.com.br/wp-content/uploads/2025/01/cropped-Favicon-Azul-32x32.png',
-            url: 'https://www.centraldatoca.com.br'
-          })
-          .setTitle(title)
-          .setURL(url)
-          .setDescription(summary)
-          .setColor(0x0F3BAA)
-          .setTimestamp();
-
-        // Add category as footer with capitalized first letter and spaces instead of dashes
-        if (category) {
-          const formattedCategory = category.replace(/-/g, ' ').charAt(0).toUpperCase() + category.replace(/-/g, ' ').slice(1);
-          embed.setFooter({ text: formattedCategory });
-        }
-
-        // Add image if available
-        if (imageUrl) {
-          embed.setImage(imageUrl);
-        }
-
-        await (channel as any).send({ embeds: [embed] });
-        console.log(`📤 Notícia enviada para ${guild.name}: ${title}`);
-        sentCount++;
+        // Check allowlist first - if channel has allowlist, it overrides server ignore patterns
+        const allowlist = await getChannelAllowlist(guild.id, channelId);
         
-      } catch (error) {
-        console.error(`❌ Erro ao enviar para ${guild.name}:`, error);
+        if (allowlist.length > 0) {
+          // Channel has allowlist - only send if category matches
+          if (!category || !allowlist.includes(category.toLowerCase())) {
+            continue; // Skip this channel
+          }
+        } else {
+          // No allowlist - use server ignore patterns
+          if (await shouldIgnoreUrlForServer(url, guild.id)) {
+            continue; // Skip this channel
+          }
+        }
+
+        try {
+          // Create rich embed format
+          const embed = new EmbedBuilder()
+            .setAuthor({ 
+              name: 'Central da Toca',
+              iconURL: 'https://www.centraldatoca.com.br/wp-content/uploads/2025/01/cropped-Favicon-Azul-32x32.png',
+              url: 'https://www.centraldatoca.com.br'
+            })
+            .setTitle(title)
+            .setURL(url)
+            .setDescription(summary)
+            .setColor(0x0F3BAA)
+            .setTimestamp();
+
+          // Add category as footer with capitalized first letter and spaces instead of dashes
+          if (category) {
+            const formattedCategory = category.replace(/-/g, ' ').charAt(0).toUpperCase() + category.replace(/-/g, ' ').slice(1);
+            embed.setFooter({ text: formattedCategory });
+          }
+
+          // Add image if available
+          if (imageUrl) {
+            embed.setImage(imageUrl);
+          }
+
+          await (channel as any).send({ embeds: [embed] });
+          console.log(`📤 Notícia enviada para ${guild.name} (${channel.name}): ${title}`);
+          sentCount++;
+          
+        } catch (error) {
+          console.error(`❌ Erro ao enviar para ${guild.name} (${channel.name}):`, error);
+        }
       }
     } catch (error) {
       console.error(`❌ Erro ao processar servidor ${guild.name}:`, error);
@@ -1071,8 +1298,9 @@ async function hasConfiguredChannels(): Promise<boolean> {
   try {
     const guilds = client.guilds.cache;
     for (const guild of guilds.values()) {
-      const channelId = await getServerChannel(guild.id);
-      if (channelId) {
+      const channels = await getServerChannels(guild.id);
+      
+      for (const channelId of channels) {
         const channel = guild.channels.cache.get(channelId);
         if (channel && channel.type === ChannelType.GuildText) {
           return true;
