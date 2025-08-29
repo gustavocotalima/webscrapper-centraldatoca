@@ -612,6 +612,7 @@ async function registerSlashCommands() {
     new SlashCommandBuilder()
       .setName('model')
       .setDescription('Gerenciar modelos de AI (apenas proprietário do bot)')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .addSubcommand(subcommand =>
         subcommand
           .setName('set')
@@ -679,6 +680,7 @@ async function registerSlashCommands() {
     new SlashCommandBuilder()
       .setName('processed')
       .setDescription('Gerenciar URLs processadas (apenas proprietário do bot)')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .addSubcommand(subcommand =>
         subcommand.setName('count').setDescription('Contar URLs processadas')
       )
@@ -1220,6 +1222,7 @@ async function handleInfoCommand(interaction: any) {
   const currentModel = await getCurrentModel();
   const settings = await getModelSettings();
   const modelConfig = MODELS[currentModel];
+  const isOwner = isBotOwner(interaction.user.id);
   
   const channels = await getServerChannels(interaction.guildId);
   const processedCount = await getProcessedUrlsCount();
@@ -1250,12 +1253,15 @@ async function handleInfoCommand(interaction: any) {
   const embed = new EmbedBuilder()
     .setTitle('ℹ️ Informações do Bot')
     .addFields(
-      { name: '🤖 Modelo AI Atual', value: modelConfig.displayName, inline: true },
-      { name: '🎛️ Temperature', value: settings.temperature.toString(), inline: true },
-      { name: '📊 Max Tokens', value: settings.max_tokens.toString(), inline: true },
+      ...(isOwner ? [
+        { name: '🤖 Modelo AI Atual', value: modelConfig.displayName, inline: true },
+        { name: '🎛️ Temperature', value: settings.temperature.toString(), inline: true },
+        { name: '📊 Max Tokens', value: settings.max_tokens.toString(), inline: true }
+      ] : []),
       { name: '📍 Canais Configurados', value: channelsInfo, inline: false },
       { name: '📈 URLs Processadas', value: processedCount.toString(), inline: true }
     )
+    .setDescription('⚠️ **Aviso:** Os resumos são gerados por Inteligência Artificial e podem conter imprecisões. Sempre consulte a notícia original para informações completas e precisas.')
     .setFooter({ text: 'Central da Toca News Bot' });
 
   await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
@@ -1305,7 +1311,8 @@ async function handleHelpCommand(interaction: any) {
 
   helpText += '**ℹ️ Sobre:**\n';
   helpText += 'Este bot monitora notícias do Central da Toca e envia resumos gerados por AI.\n';
-  helpText += 'Verifica novas notícias a cada 60 segundos.';
+  helpText += 'Verifica novas notícias a cada 60 segundos.\n\n';
+  helpText += '⚠️ **Aviso:** Os resumos são gerados por Inteligência Artificial e podem conter imprecisões. Sempre consulte a notícia original para informações completas e precisas.';
 
   const embed = new EmbedBuilder()
     .setTitle('🤖 Central da Toca News Bot - Ajuda')
