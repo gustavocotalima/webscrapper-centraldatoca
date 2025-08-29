@@ -13,7 +13,7 @@ A Discord bot that monitors news from Central da Toca website and sends AI-power
 - 🗃️ **Redis persistence** to prevent duplicate news on deployments
 - ⚡ **Immediate sending** - news sent as soon as processed
 - 🖼️ **Image extraction** from news articles
-- 🎯 **Advanced filtering** with per-channel allowlists and server ignore patterns
+- 🎯 **Advanced filtering** with per-channel allowlists and per-channel ignore patterns
 - 👑 **Role-based permissions** (bot owner vs server admin)
 
 ## Bot Commands
@@ -30,9 +30,10 @@ A Discord bot that monitors news from Central da Toca website and sends AI-power
 - `/channel list` - List all configured channels
 
 **Global Filters:**
-- `/ignore add` - Add URL pattern to ignore server-wide (e.g., "sada", "feminino")
-- `/ignore remove` - Remove URL pattern from ignore list
-- `/ignore list` - List all ignored URL patterns
+- `/ignore add <channel> <pattern>` - Add ignore pattern for specific channel
+- `/ignore remove <channel> <pattern>` - Remove ignore pattern from channel  
+- `/ignore list <channel>` - List channel's ignore patterns
+- `/ignore clear <channel>` - Clear all ignore patterns from channel
 
 **Per-Channel Allowlists:**
 - `/allowlist add <channel> <category>` - Allow specific category for a channel
@@ -102,8 +103,9 @@ docker-compose up -d
 ## Filtering Logic
 
 1. **Channel has allowlist**: Only news matching allowlisted categories are sent
-2. **Channel has no allowlist**: Uses server-wide ignore patterns
-3. **Priority**: Allowlists override ignore patterns for maximum flexibility
+2. **Channel has no allowlist**: Uses per-channel ignore patterns
+3. **Priority**: Allowlists override ignore patterns (if allowlist exists, ignore patterns are ignored)
+4. **Per-channel control**: Each channel has independent filtering configuration
 
 ## News Format
 
@@ -153,12 +155,13 @@ Each news article is sent as a Discord embed with:
 # - #general-news: All news (unless server has ignore patterns)
 ```
 
-### Server-Wide Filtering
+### Per-Channel Filtering
 ```
-# Ignore specific categories across all channels
-/ignore add feminino
-/ignore add sada
+# Configure different ignore patterns per channel
+/ignore add #general-news feminino
+/ignore add #general-news sada
+/ignore add #sports-news apostas
 
-# Channels without allowlists will respect these ignore patterns
-# Channels with allowlists override these patterns
+# Each channel has independent ignore patterns
+# Channels with allowlists will ignore these patterns completely
 ```

@@ -129,26 +129,44 @@ async function removeFromChannelAllowlist(guildId: string, channelId: string, ca
   }
 }
 
-async function getServerIgnoreUrls(guildId: string): Promise<string[]> {
+// Per-channel ignore patterns
+async function getChannelIgnoreUrls(guildId: string, channelId: string): Promise<string[]> {
   try {
-    const data = await redis.get(`server:${guildId}:ignore_urls`);
-    if (!data) {
-      const defaultIgnoreUrls: string[] = []; // No filters by default
-      await redis.set(`server:${guildId}:ignore_urls`, JSON.stringify(defaultIgnoreUrls));
-      return defaultIgnoreUrls;
-    }
-    return JSON.parse(data);
+    const data = await redis.get(`server:${guildId}:channel:${channelId}:ignore`);
+    return data ? JSON.parse(data) : [];
   } catch (err) {
-    console.error('Erro ao carregar URLs ignoradas do servidor:', err);
-    return []; // No filters on error
+    console.error('Erro ao buscar padrões ignorados do canal:', err);
+    return [];
   }
 }
 
-async function setServerIgnoreUrls(guildId: string, ignoreUrls: string[]): Promise<void> {
+async function setChannelIgnoreUrls(guildId: string, channelId: string, ignoreUrls: string[]): Promise<void> {
   try {
-    await redis.set(`server:${guildId}:ignore_urls`, JSON.stringify(ignoreUrls));
+    await redis.set(`server:${guildId}:channel:${channelId}:ignore`, JSON.stringify(ignoreUrls));
   } catch (err) {
-    console.error('Erro ao definir URLs ignoradas do servidor:', err);
+    console.error('Erro ao definir padrões ignorados do canal:', err);
+  }
+}
+
+async function addToChannelIgnoreUrls(guildId: string, channelId: string, pattern: string): Promise<void> {
+  try {
+    const currentIgnoreUrls = await getChannelIgnoreUrls(guildId, channelId);
+    if (!currentIgnoreUrls.includes(pattern)) {
+      currentIgnoreUrls.push(pattern);
+      await setChannelIgnoreUrls(guildId, channelId, currentIgnoreUrls);
+    }
+  } catch (err) {
+    console.error('Erro ao adicionar padrão ignorado ao canal:', err);
+  }
+}
+
+async function removeFromChannelIgnoreUrls(guildId: string, channelId: string, pattern: string): Promise<void> {
+  try {
+    const currentIgnoreUrls = await getChannelIgnoreUrls(guildId, channelId);
+    const updatedIgnoreUrls = currentIgnoreUrls.filter(p => p !== pattern);
+    await setChannelIgnoreUrls(guildId, channelId, updatedIgnoreUrls);
+  } catch (err) {
+    console.error('Erro ao remover padrão ignorado do canal:', err);
   }
 }
 
@@ -242,33 +260,46 @@ function isServerAdmin(member: any): boolean {
 }
 
 // Check if URL should be ignored for specific server
-async function shouldIgnoreUrlForServer(url: string, guildId: string): Promise<boolean> {
-  const ignoreUrls = await getServerIgnoreUrls(guildId);
-  return ignoreUrls.some(segment => url.includes(`/${segment}/`));
-}
-
-// Check if URL is ignored by ALL servers (skip AI processing if so)
-async function isUrlIgnoredByAllServers(url: string): Promise<boolean> {
+// Check if URL is ignored by ALL channels (skip AI processing if so)
+async function isUrlIgnoredByAllChannels(url: string, category?: string): Promise<boolean> {
   try {
     const guilds = client.guilds.cache;
     if (guilds.size === 0) return false; // No servers = don't ignore
     
+    let hasActiveChannels = false;
+    
     for (const guild of guilds.values()) {
       const channels = await getServerChannels(guild.id);
-      if (channels.length > 0) {
-        // This server has configured channels
-        const isIgnored = await shouldIgnoreUrlForServer(url, guild.id);
-        if (!isIgnored) {
-          // At least one server doesn't ignore this URL
-          return false;
+      
+      for (const channelId of channels) {
+        hasActiveChannels = true;
+        
+        // Check if this channel would accept the news
+        const allowlist = await getChannelAllowlist(guild.id, channelId);
+        
+        if (allowlist.length > 0) {
+          // Channel has allowlist - check if category matches
+          if (category && allowlist.includes(category.toLowerCase())) {
+            return false; // At least one channel accepts this news
+          }
+        } else {
+          // No allowlist - check ignore patterns
+          const ignorePatterns = await getChannelIgnoreUrls(guild.id, channelId);
+          const shouldIgnore = ignorePatterns.some(pattern => url.includes(`/${pattern}/`));
+          if (!shouldIgnore) {
+            return false; // At least one channel accepts this news
+          }
         }
       }
     }
     
-    // All servers with configured channels ignore this URL
+    // If no channels are configured, don't ignore
+    if (!hasActiveChannels) return false;
+    
+    // All channels would ignore this URL
     return true;
   } catch (error) {
-    console.error('Erro ao verificar se URL é ignorada por todos os servidores:', error);
+    console.error('Erro ao verificar se URL é ignorada por todos os canais:', error);
     return false; // Default to not ignore on error
   }
 }
@@ -487,7 +518,7 @@ async function scrapeNews(): Promise<Array<{ title: string; url: string; summary
 async function processAndSendNews(news: { title: string; url: string; summary: string; imageUrl?: string; category?: string }): Promise<void> {
   try {
     // Check if this URL is ignored by ALL servers before AI processing
-    const ignoredByAll = await isUrlIgnoredByAllServers(news.url);
+    const ignoredByAll = await isUrlIgnoredByAllChannels(news.url, news.category);
     if (ignoredByAll) {
       console.log(`⏭️ URL ignorada por todos os servidores: ${news.title}`);
       return;
@@ -546,8 +577,7 @@ client.on('guildCreate', async (guild) => {
     console.log(`Canal padrão definido para ${guild.name}: ${defaultChannel.name}`);
   }
   
-  // Set default ignore patterns (none by default)
-  await setServerIgnoreUrls(guild.id, []);
+  // No default ignore patterns needed in per-channel system
 });
 
 client.on('interactionCreate', async (interaction) => {
@@ -683,12 +713,18 @@ async function registerSlashCommands() {
 
     new SlashCommandBuilder()
       .setName('ignore')
-      .setDescription('Gerenciar padrões de URL ignorados (apenas administradores)')
+      .setDescription('Gerenciar padrões de URL ignorados por canal (apenas administradores)')
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .addSubcommand(subcommand =>
         subcommand
           .setName('add')
-          .setDescription('Adicionar padrão de URL a ser ignorado')
+          .setDescription('Adicionar padrão de URL ignorado para um canal')
+          .addChannelOption(option =>
+            option.setName('channel')
+              .setDescription('Canal para configurar')
+              .setRequired(true)
+              .addChannelTypes(ChannelType.GuildText)
+          )
           .addStringOption(option =>
             option.setName('pattern')
               .setDescription('Padrão de URL a ser ignorado (ex: sada, feminino)')
@@ -698,7 +734,13 @@ async function registerSlashCommands() {
       .addSubcommand(subcommand =>
         subcommand
           .setName('remove')
-          .setDescription('Remover padrão de URL ignorado')
+          .setDescription('Remover padrão de URL ignorado de um canal')
+          .addChannelOption(option =>
+            option.setName('channel')
+              .setDescription('Canal para configurar')
+              .setRequired(true)
+              .addChannelTypes(ChannelType.GuildText)
+          )
           .addStringOption(option =>
             option.setName('pattern')
               .setDescription('Padrão de URL a ser removido')
@@ -706,7 +748,26 @@ async function registerSlashCommands() {
           )
       )
       .addSubcommand(subcommand =>
-        subcommand.setName('list').setDescription('Listar padrões de URL ignorados')
+        subcommand
+          .setName('list')
+          .setDescription('Listar padrões de URL ignorados de um canal')
+          .addChannelOption(option =>
+            option.setName('channel')
+              .setDescription('Canal para listar')
+              .setRequired(true)
+              .addChannelTypes(ChannelType.GuildText)
+          )
+      )
+      .addSubcommand(subcommand =>
+        subcommand
+          .setName('clear')
+          .setDescription('Limpar padrões ignorados de um canal')
+          .addChannelOption(option =>
+            option.setName('channel')
+              .setDescription('Canal para limpar')
+              .setRequired(true)
+              .addChannelTypes(ChannelType.GuildText)
+          )
       ),
 
     new SlashCommandBuilder()
@@ -1026,58 +1087,68 @@ async function handleIgnoreCommand(interaction: any, options: any) {
 
   switch (subcommand) {
     case 'add': {
-      const addPattern = options.getString('pattern').toLowerCase();
-      const currentIgnoreUrls = await getServerIgnoreUrls(interaction.guildId);
+      const channel = options.getChannel('channel');
+      const pattern = options.getString('pattern').toLowerCase();
+      const currentIgnoreUrls = await getChannelIgnoreUrls(interaction.guildId, channel.id);
       
-      if (currentIgnoreUrls.includes(addPattern)) {
+      if (currentIgnoreUrls.includes(pattern)) {
         return interaction.reply({ 
-          content: `❌ O padrão "${addPattern}" já está na lista.`, 
+          content: `❌ O padrão "${pattern}" já está na lista do canal ${channel}.`, 
           flags: MessageFlags.Ephemeral 
         });
       }
 
-      currentIgnoreUrls.push(addPattern);
-      await setServerIgnoreUrls(interaction.guildId, currentIgnoreUrls);
+      await addToChannelIgnoreUrls(interaction.guildId, channel.id, pattern);
       await interaction.reply({ 
-        content: `✅ Padrão "${addPattern}" adicionado à lista de ignorados.`, 
+        content: `✅ Padrão "${pattern}" adicionado à lista de ignorados do canal ${channel}.`, 
         flags: MessageFlags.Ephemeral 
       });
       break;
     }
 
     case 'remove': {
-      const removePattern = options.getString('pattern').toLowerCase();
-      const ignoreUrls = await getServerIgnoreUrls(interaction.guildId);
-      const index = ignoreUrls.indexOf(removePattern);
+      const channel = options.getChannel('channel');
+      const pattern = options.getString('pattern').toLowerCase();
+      const ignoreUrls = await getChannelIgnoreUrls(interaction.guildId, channel.id);
       
-      if (index === -1) {
+      if (!ignoreUrls.includes(pattern)) {
         return interaction.reply({ 
-          content: `❌ O padrão "${removePattern}" não está na lista.`, 
+          content: `❌ O padrão "${pattern}" não está na lista do canal ${channel}.`, 
           flags: MessageFlags.Ephemeral 
         });
       }
 
-      ignoreUrls.splice(index, 1);
-      await setServerIgnoreUrls(interaction.guildId, ignoreUrls);
+      await removeFromChannelIgnoreUrls(interaction.guildId, channel.id, pattern);
       await interaction.reply({ 
-        content: `✅ Padrão "${removePattern}" removido da lista de ignorados.`, 
+        content: `✅ Padrão "${pattern}" removido da lista de ignorados do canal ${channel}.`, 
         flags: MessageFlags.Ephemeral 
       });
       break;
     }
 
     case 'list': {
-      const listIgnoreUrls = await getServerIgnoreUrls(interaction.guildId);
-      const listText = listIgnoreUrls.length > 0 
-        ? listIgnoreUrls.map(pattern => `• ${pattern}`).join('\n')
+      const channel = options.getChannel('channel');
+      const ignoreUrls = await getChannelIgnoreUrls(interaction.guildId, channel.id);
+      const listText = ignoreUrls.length > 0 
+        ? ignoreUrls.map(pattern => `• ${pattern}`).join('\n')
         : 'Nenhum padrão configurado.';
 
       const embed = new EmbedBuilder()
-        .setTitle('🚫 Padrões de URL Ignorados')
+        .setTitle(`🚫 Padrões ignorados - ${channel.name}`)
         .setDescription(listText)
         .setColor(0xFF6B6B);
 
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      break;
+    }
+
+    case 'clear': {
+      const channel = options.getChannel('channel');
+      await setChannelIgnoreUrls(interaction.guildId, channel.id, []);
+      await interaction.reply({ 
+        content: `✅ Padrões ignorados do canal ${channel} foram limpos.`, 
+        flags: MessageFlags.Ephemeral 
+      });
       break;
     }
   }
@@ -1143,16 +1214,30 @@ async function handleInfoCommand(interaction: any) {
   const modelConfig = MODELS[currentModel];
   
   const channels = await getServerChannels(interaction.guildId);
-  const ignoreUrls = await getServerIgnoreUrls(interaction.guildId);
   const processedCount = await getProcessedUrlsCount();
 
-  // Format channels information
-  const channelsInfo = channels.length > 0 
-    ? channels.map(id => {
-        const channel = interaction.guild.channels.cache.get(id);
-        return channel ? `<#${id}>` : 'Não encontrado';
-      }).join(', ')
-    : 'Nenhum configurado';
+  // Format channels information with their configuration
+  let channelsInfo = 'Nenhum configurado';
+  if (channels.length > 0) {
+    const channelDetails = [];
+    for (const channelId of channels) {
+      const channel = interaction.guild.channels.cache.get(channelId);
+      if (channel) {
+        const allowlist = await getChannelAllowlist(interaction.guildId, channelId);
+        const ignoreList = await getChannelIgnoreUrls(interaction.guildId, channelId);
+        
+        let config = '';
+        if (allowlist.length > 0) {
+          config = ` (allow: ${allowlist.join(', ')})`;
+        } else if (ignoreList.length > 0) {
+          config = ` (ignore: ${ignoreList.join(', ')})`;
+        }
+        
+        channelDetails.push(`<#${channelId}>${config}`);
+      }
+    }
+    channelsInfo = channelDetails.join('\n');
+  }
 
   const embed = new EmbedBuilder()
     .setTitle('ℹ️ Informações do Bot')
@@ -1160,8 +1245,7 @@ async function handleInfoCommand(interaction: any) {
       { name: '🤖 Modelo AI Atual', value: modelConfig.displayName, inline: true },
       { name: '🎛️ Temperature', value: settings.temperature.toString(), inline: true },
       { name: '📊 Max Tokens', value: settings.max_tokens.toString(), inline: true },
-      { name: '📍 Canais de Notícias', value: channelsInfo, inline: false },
-      { name: '🚫 URLs Ignoradas', value: ignoreUrls.length > 0 ? ignoreUrls.join(', ') : 'Nenhuma', inline: true },
+      { name: '📍 Canais Configurados', value: channelsInfo, inline: false },
       { name: '📈 URLs Processadas', value: processedCount.toString(), inline: true }
     )
     .setFooter({ text: 'Central da Toca News Bot' });
@@ -1188,14 +1272,16 @@ async function handleHelpCommand(interaction: any) {
     helpText += '• `/channel remove` - Remover canal de notícias\n';
     helpText += '• `/channel list` - Listar canais configurados\n';
     helpText += '**Filtros Globais:**\n';
-    helpText += '• `/ignore add` - Adicionar padrão de URL ignorado\n';
-    helpText += '• `/ignore remove` - Remover padrão de URL ignorado\n';
-    helpText += '• `/ignore list` - Listar padrões ignorados\n';
+    helpText += '**Ignore (por canal):**\n';
+    helpText += '• `/ignore add <canal> <padrão>` - Adicionar padrão ignorado\n';
+    helpText += '• `/ignore remove <canal> <padrão>` - Remover padrão ignorado\n';
+    helpText += '• `/ignore list <canal>` - Listar padrões ignorados\n';
+    helpText += '• `/ignore clear <canal>` - Limpar padrões ignorados\n';
     helpText += '**Allowlists (por canal):**\n';
-    helpText += '• `/allowlist add` - Adicionar categoria à allowlist\n';
-    helpText += '• `/allowlist remove` - Remover categoria da allowlist\n';
-    helpText += '• `/allowlist list` - Ver allowlist do canal\n';
-    helpText += '• `/allowlist clear` - Limpar allowlist do canal\n\n';
+    helpText += '• `/allowlist add <canal> <categoria>` - Adicionar categoria à allowlist\n';
+    helpText += '• `/allowlist remove <canal> <categoria>` - Remover categoria da allowlist\n';
+    helpText += '• `/allowlist list <canal>` - Ver allowlist do canal\n';
+    helpText += '• `/allowlist clear <canal>` - Limpar allowlist do canal\n\n';
   }
 
   // Owner commands
@@ -1235,7 +1321,7 @@ async function sendNewsToAllChannels(title: string, summary: string, url: string
         const channel = guild.channels.cache.get(channelId);
         if (!channel || channel.type !== ChannelType.GuildText) continue;
 
-        // Check allowlist first - if channel has allowlist, it overrides server ignore patterns
+        // Check allowlist first - if channel has allowlist, it takes priority
         const allowlist = await getChannelAllowlist(guild.id, channelId);
         
         if (allowlist.length > 0) {
@@ -1244,8 +1330,10 @@ async function sendNewsToAllChannels(title: string, summary: string, url: string
             continue; // Skip this channel
           }
         } else {
-          // No allowlist - use server ignore patterns
-          if (await shouldIgnoreUrlForServer(url, guild.id)) {
+          // No allowlist - use per-channel ignore patterns
+          const ignorePatterns = await getChannelIgnoreUrls(guild.id, channelId);
+          const shouldIgnore = ignorePatterns.some(pattern => url.includes(`/${pattern}/`));
+          if (shouldIgnore) {
             continue; // Skip this channel
           }
         }
