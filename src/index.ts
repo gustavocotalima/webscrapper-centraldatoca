@@ -533,7 +533,7 @@ async function processAndSendNews(news: { title: string; url: string; summary: s
     const prompt = `Reescreva o texto da notícia para ter no máximo 1700 caracteres, contendo apenas as informações mais importantes.
     
     IMPORTANTE: 
-    - NÃO repita o título no início do texto resumido
+    - NÃO repita o título
     - O título já será exibido separadamente
     - Comece o resumo diretamente com as informações da notícia
     - Não mencione que é um resumo ou que a notícia foi obtida por web scraping
