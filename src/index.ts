@@ -38,7 +38,8 @@ const googleAI = GOOGLE_AI_API_KEY ? new GoogleGenerativeAI(GOOGLE_AI_API_KEY) :
 const MODELS: Record<string, { provider: string; model?: string; displayName: string }> = {
   'deepseek-chat': { provider: 'deepseek', displayName: 'DeepSeek Chat' },
   'gemini-2.0-flash': { provider: 'google', model: 'gemini-2.0-flash-exp', displayName: 'Gemini 2.0 Flash' },
-  'gemini-2.0-flash-lite': { provider: 'google', model: 'gemini-2.0-flash-thinking-exp-1219', displayName: 'Gemini 2.0 Flash Lite' },
+  'gemini-2.0-flash-lite': { provider: 'google', model: 'gemini-2.0-flash-lite', displayName: 'Gemini 2.0 Flash Lite' },
+  'gemini-2.5-flash-lite': { provider: 'google', model: 'gemini-2.5-flash-lite', displayName: 'Gemini 2.5 Flash Lite' },
   'gpt-4o-mini': { provider: 'openai', model: 'gpt-4o-mini', displayName: 'GPT-4o Mini' },
   'gpt-5-nano': { provider: 'openai', model: 'gpt-5-nano', displayName: 'GPT-5 Nano' }
 };
